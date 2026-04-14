@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { Columns3, Calculator, TrendingUp, Clock, CalendarDays } from 'lucide-react'
+import { Columns3, Calculator, CalendarDays, Clock } from 'lucide-react'
 
 const navItems = [
   { to: '/',         icon: Columns3,     label: 'Pipeline'      },
@@ -13,36 +13,25 @@ export default function Sidebar() {
     <aside style={{
       width: 220,
       minHeight: '100vh',
-      background: '#1a1d27',
-      borderRight: '1px solid #2a2f45',
+      background: '#00263E',
+      borderRight: '1px solid #004065',
       display: 'flex',
       flexDirection: 'column',
       flexShrink: 0,
     }}>
       {/* Logo */}
-      <div style={{
-        padding: '24px 20px 20px',
-        borderBottom: '1px solid #2a2f45',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{
-            width: 34,
-            height: 34,
-            background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+      <div style={{ padding: '18px 16px 16px', borderBottom: '1px solid #004065' }}>
+        <img
+          src="/logo.png"
+          alt="Caring Transitions Denver Southeast"
+          style={{
+            width: '100%',
             borderRadius: 8,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}>
-            <TrendingUp size={18} color="#fff" />
-          </div>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 14, color: '#f0f2ff', letterSpacing: '-0.3px' }}>
-              AuctionCRM
-            </div>
-            <div style={{ fontSize: 11, color: '#555b75' }}>Lead Manager</div>
-          </div>
-        </div>
+            background: '#fff',
+            padding: '10px 12px',
+            display: 'block',
+          }}
+        />
       </div>
 
       {/* Nav */}
@@ -62,8 +51,9 @@ export default function Sidebar() {
               textDecoration: 'none',
               fontSize: 14,
               fontWeight: 500,
-              color: isActive ? '#f0f2ff' : '#8b8fa8',
-              background: isActive ? 'rgba(99,102,241,0.15)' : 'transparent',
+              color: isActive ? '#f0f2ff' : '#6da8c5',
+              background: isActive ? 'rgba(165,0,80,0.20)' : 'transparent',
+              borderLeft: isActive ? '3px solid #A50050' : '3px solid transparent',
               transition: 'all 0.15s',
             })}
           >
@@ -74,8 +64,13 @@ export default function Sidebar() {
       </nav>
 
       {/* Footer */}
-      <div style={{ padding: '16px 20px', borderTop: '1px solid #2a2f45' }}>
-        <div style={{ fontSize: 11, color: '#555b75' }}>v1.1.0 — Live Data</div>
+      <div style={{ padding: '14px 16px', borderTop: '1px solid #004065' }}>
+        <div style={{ fontSize: 10, color: '#3d7a99', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+          Caring Transitions Denver SE
+        </div>
+        <div style={{ fontSize: 10, color: '#004065', marginTop: 2 }}>
+          Lead Management System
+        </div>
       </div>
     </aside>
   )

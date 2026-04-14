@@ -43,7 +43,7 @@ const JOB_TYPE_OPTIONS = ['Clean Out', 'Auction', 'Both']
 function Field({ label, children }) {
   return (
     <div style={{ marginBottom: 16 }}>
-      <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#555b75', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 5 }}>
+      <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#3d7a99', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 5 }}>
         {label}
       </label>
       {children}
@@ -53,8 +53,8 @@ function Field({ label, children }) {
 
 const inputStyle = {
   width: '100%',
-  background: '#0f1117',
-  border: '1px solid #2a2f45',
+  background: '#001929',
+  border: '1px solid #004065',
   borderRadius: 7,
   padding: '8px 11px',
   fontSize: 13,
@@ -120,8 +120,8 @@ export default function LeadModal({ lead, isNew, onClose, onSave }) {
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
     >
       <div style={{
-        background: '#1a1d27',
-        border: '1px solid #2a2f45',
+        background: '#00263E',
+        border: '1px solid #004065',
         borderRadius: 14,
         width: '100%',
         maxWidth: 760,
@@ -133,7 +133,7 @@ export default function LeadModal({ lead, isNew, onClose, onSave }) {
         {/* Header */}
         <div style={{
           padding: '18px 22px',
-          borderBottom: '1px solid #2a2f45',
+          borderBottom: '1px solid #004065',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
@@ -143,14 +143,14 @@ export default function LeadModal({ lead, isNew, onClose, onSave }) {
             <div>
               <div style={{ fontWeight: 700, fontSize: 17, color: '#f0f2ff' }}>{headerTitle}</div>
               {!isNew && lead.address && (
-                <div style={{ fontSize: 12, color: '#555b75', marginTop: 2 }}>{lead.address}</div>
+                <div style={{ fontSize: 12, color: '#3d7a99', marginTop: 2 }}>{lead.address}</div>
               )}
             </div>
             {score && <ScoreBadge score={score.dealScore} size="lg" />}
           </div>
           <button
             onClick={onClose}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#555b75', padding: 4 }}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#3d7a99', padding: 4 }}
           >
             <X size={18} />
           </button>
@@ -159,8 +159,8 @@ export default function LeadModal({ lead, isNew, onClose, onSave }) {
         {/* Body — scrollable */}
         <div style={{ flex: 1, overflow: 'auto', display: 'flex' }}>
           {/* Left: editable fields */}
-          <div style={{ flex: 1, padding: '20px 22px', borderRight: '1px solid #2a2f45', overflowY: 'auto' }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: '#6366f1', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 16 }}>
+          <div style={{ flex: 1, padding: '20px 22px', borderRight: '1px solid #004065', overflowY: 'auto' }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: '#A50050', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 16 }}>
               Lead Info
             </div>
 
@@ -192,7 +192,7 @@ export default function LeadModal({ lead, isNew, onClose, onSave }) {
               />
             </Field>
 
-            <div style={{ fontSize: 12, fontWeight: 600, color: '#6366f1', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '20px 0 16px' }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: '#A50050', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '20px 0 16px' }}>
               Job Details
             </div>
 
@@ -262,14 +262,14 @@ export default function LeadModal({ lead, isNew, onClose, onSave }) {
                   href={googleCalUrl({ ...form }, members.find(m => m.id === form.assigned_to)?.name)}
                   target="_blank"
                   rel="noreferrer"
-                  style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#0f1117', border: '1px solid #2a2f45', borderRadius: 7, padding: '6px 12px', fontSize: 12, fontWeight: 500, color: '#8b8fa8', textDecoration: 'none' }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#001929', border: '1px solid #004065', borderRadius: 7, padding: '6px 12px', fontSize: 12, fontWeight: 500, color: '#6da8c5', textDecoration: 'none' }}
                 >
                   <ExternalLink size={12} />
                   Add to Google Calendar
                 </a>
                 <button
                   onClick={() => downloadICS({ ...form }, members.find(m => m.id === form.assigned_to)?.name)}
-                  style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#0f1117', border: '1px solid #2a2f45', borderRadius: 7, padding: '6px 12px', fontSize: 12, fontWeight: 500, color: '#8b8fa8', cursor: 'pointer' }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#001929', border: '1px solid #004065', borderRadius: 7, padding: '6px 12px', fontSize: 12, fontWeight: 500, color: '#6da8c5', cursor: 'pointer' }}
                 >
                   <Download size={12} />
                   Apple Calendar (.ics)
@@ -291,7 +291,7 @@ export default function LeadModal({ lead, isNew, onClose, onSave }) {
           <div style={{ width: 240, padding: '20px 18px', overflowY: 'auto', flexShrink: 0 }}>
             {score ? (
               <>
-                <div style={{ fontSize: 12, fontWeight: 600, color: '#6366f1', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 14 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: '#A50050', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 14 }}>
                   Deal Summary
                 </div>
 
@@ -304,8 +304,8 @@ export default function LeadModal({ lead, isNew, onClose, onSave }) {
                   { label: 'Est. Profit',  value: `$${score.estimatedProfit.toLocaleString()}`, color: score.estimatedProfit > 0 ? '#22c55e' : '#ef4444' },
                   { label: 'Margin',       value: `${score.profitMarginPct}%` },
                 ].map(({ label, value, bold, color }) => (
-                  <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #2a2f45' }}>
-                    <span style={{ fontSize: 12, color: '#8b8fa8' }}>{label}</span>
+                  <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #004065' }}>
+                    <span style={{ fontSize: 12, color: '#6da8c5' }}>{label}</span>
                     <span style={{ fontSize: 12, fontWeight: bold ? 700 : 500, color: color || '#f0f2ff' }}>{value}</span>
                   </div>
                 ))}
@@ -313,18 +313,18 @@ export default function LeadModal({ lead, isNew, onClose, onSave }) {
                 {/* Move to next stage */}
                 {nextStage && !isNew && (
                   <div style={{ marginTop: 24 }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: '#555b75', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8 }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: '#3d7a99', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8 }}>
                       Move to next stage
                     </div>
                     <button
                       onClick={() => handleChange('status', nextStage)}
                       style={{
                         width: '100%',
-                        background: 'rgba(99,102,241,0.12)',
-                        border: '1px solid rgba(99,102,241,0.3)',
+                        background: 'rgba(165,0,80,0.12)',
+                        border: '1px solid rgba(165,0,80,0.3)',
                         borderRadius: 8,
                         padding: '8px 12px',
-                        color: '#a5b4fc',
+                        color: '#f4adc5',
                         fontSize: 12,
                         fontWeight: 500,
                         cursor: 'pointer',
@@ -340,7 +340,7 @@ export default function LeadModal({ lead, isNew, onClose, onSave }) {
                 )}
               </>
             ) : (
-              <div style={{ color: '#555b75', fontSize: 12 }}>Fill in square footage, density, item quality, and job type to see deal summary.</div>
+              <div style={{ color: '#3d7a99', fontSize: 12 }}>Fill in square footage, density, item quality, and job type to see deal summary.</div>
             )}
           </div>
         </div>
@@ -348,7 +348,7 @@ export default function LeadModal({ lead, isNew, onClose, onSave }) {
         {/* Footer */}
         <div style={{
           padding: '14px 22px',
-          borderTop: '1px solid #2a2f45',
+          borderTop: '1px solid #004065',
           display: 'flex',
           justifyContent: 'flex-end',
           gap: 10,
@@ -358,10 +358,10 @@ export default function LeadModal({ lead, isNew, onClose, onSave }) {
             onClick={onClose}
             style={{
               background: 'none',
-              border: '1px solid #2a2f45',
+              border: '1px solid #004065',
               borderRadius: 8,
               padding: '8px 18px',
-              color: '#8b8fa8',
+              color: '#6da8c5',
               fontSize: 13,
               cursor: 'pointer',
             }}
@@ -372,11 +372,11 @@ export default function LeadModal({ lead, isNew, onClose, onSave }) {
             onClick={handleSave}
             disabled={saving || !form.name?.trim()}
             style={{
-              background: form.name?.trim() ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : '#2a2f45',
+              background: form.name?.trim() ? 'linear-gradient(135deg, #A50050, #CD545B)' : '#004065',
               border: 'none',
               borderRadius: 8,
               padding: '8px 20px',
-              color: form.name?.trim() ? '#fff' : '#555b75',
+              color: form.name?.trim() ? '#fff' : '#3d7a99',
               fontSize: 13,
               fontWeight: 600,
               cursor: form.name?.trim() ? 'pointer' : 'not-allowed',

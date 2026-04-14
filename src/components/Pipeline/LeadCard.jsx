@@ -3,9 +3,9 @@ import ScoreBadge from './ScoreBadge'
 import { useTeam } from '../../lib/TeamContext'
 
 const JOB_COLORS = {
-  'Clean Out': '#6366f1',
-  'Auction':   '#8b5cf6',
-  'Both':      '#06b6d4',
+  'Clean Out': '#A50050',
+  'Auction':   '#CD545B',
+  'Both':      '#71C5E8',
 }
 
 export default function LeadCard({ lead, onClick }) {
@@ -16,8 +16,8 @@ export default function LeadCard({ lead, onClick }) {
     <div
       onClick={onClick}
       style={{
-        background: '#1e2235',
-        border: '1px solid #2a2f45',
+        background: '#002d4a',
+        border: '1px solid #004065',
         borderRadius: 10,
         padding: '12px 14px',
         cursor: 'pointer',
@@ -25,12 +25,12 @@ export default function LeadCard({ lead, onClick }) {
         userSelect: 'none',
       }}
       onMouseEnter={e => {
-        e.currentTarget.style.borderColor = '#6366f1'
-        e.currentTarget.style.background = '#252840'
+        e.currentTarget.style.borderColor = '#A50050'
+        e.currentTarget.style.background = '#003555'
       }}
       onMouseLeave={e => {
-        e.currentTarget.style.borderColor = '#2a2f45'
-        e.currentTarget.style.background = '#1e2235'
+        e.currentTarget.style.borderColor = '#004065'
+        e.currentTarget.style.background = '#002d4a'
       }}
     >
       {/* Header row */}
@@ -43,15 +43,15 @@ export default function LeadCard({ lead, onClick }) {
 
       {/* Phone */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4 }}>
-        <Phone size={11} color="#555b75" />
-        <span style={{ fontSize: 12, color: '#8b8fa8' }}>{lead.phone}</span>
+        <Phone size={11} color="#3d7a99" />
+        <span style={{ fontSize: 12, color: '#6da8c5' }}>{lead.phone}</span>
       </div>
 
       {/* Address */}
       {lead.address && (
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 5, marginBottom: 8 }}>
-          <MapPin size={11} color="#555b75" style={{ marginTop: 2, flexShrink: 0 }} />
-          <span style={{ fontSize: 12, color: '#8b8fa8', lineHeight: 1.4 }}>
+          <MapPin size={11} color="#3d7a99" style={{ marginTop: 2, flexShrink: 0 }} />
+          <span style={{ fontSize: 12, color: '#6da8c5', lineHeight: 1.4 }}>
             {lead.address.length > 40 ? lead.address.slice(0, 40) + '…' : lead.address}
           </span>
         </div>

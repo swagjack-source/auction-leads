@@ -87,8 +87,8 @@ function downloadTemplate() {
 }
 
 const inputStyle = {
-  background: '#0f1117',
-  border: '1px solid #2a2f45',
+  background: '#001929',
+  border: '1px solid #004065',
   borderRadius: 7,
   padding: '7px 10px',
   fontSize: 13,
@@ -133,10 +133,10 @@ function AddModal({ onClose, onSaved }) {
       style={{ position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div style={{ background: '#1a1d27', border: '1px solid #2a2f45', borderRadius: 14, width: '100%', maxWidth: 560, maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid #2a2f45', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ background: '#00263E', border: '1px solid #004065', borderRadius: 14, width: '100%', maxWidth: 560, maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid #004065', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ fontWeight: 700, fontSize: 16, color: '#f0f2ff' }}>Add Past Project</div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#555b75' }}><X size={18} /></button>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#3d7a99' }}><X size={18} /></button>
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
@@ -152,19 +152,19 @@ function AddModal({ onClose, onSaved }) {
               { label: 'Actual Profit ($)',     key: 'actual_profit',      type: 'number', placeholder: '3850' },
             ].map(({ label, key, type, placeholder }) => (
               <div key={key}>
-                <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#555b75', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 5 }}>{label}</label>
+                <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#3d7a99', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 5 }}>{label}</label>
                 <input type={type} value={form[key]} onChange={e => set(key, e.target.value)} placeholder={placeholder} style={inputStyle} />
               </div>
             ))}
 
             <div>
-              <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#555b75', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 5 }}>Job Type *</label>
+              <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#3d7a99', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 5 }}>Job Type *</label>
               <select value={form.job_type} onChange={e => set('job_type', e.target.value)} style={selectStyle}>
                 {JOB_TYPE_OPTIONS.map(o => <option key={o}>{o}</option>)}
               </select>
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#555b75', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 5 }}>Density *</label>
+              <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#3d7a99', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 5 }}>Density *</label>
               <select value={form.density} onChange={e => set('density', e.target.value)} style={selectStyle}>
                 {DENSITY_OPTIONS.map(o => <option key={o}>{o}</option>)}
               </select>
@@ -172,19 +172,19 @@ function AddModal({ onClose, onSaved }) {
           </div>
 
           <div style={{ marginTop: 12 }}>
-            <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#555b75', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 5 }}>Notes</label>
+            <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#3d7a99', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 5 }}>Notes</label>
             <textarea value={form.notes} onChange={e => set('notes', e.target.value)} style={{ ...inputStyle, resize: 'vertical', minHeight: 60 }} placeholder="Any notes about the job…" />
           </div>
 
           {error && <div style={{ marginTop: 12, color: '#ef4444', fontSize: 13 }}>{error}</div>}
         </div>
 
-        <div style={{ padding: '14px 20px', borderTop: '1px solid #2a2f45', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-          <button onClick={onClose} style={{ background: 'none', border: '1px solid #2a2f45', borderRadius: 8, padding: '8px 18px', color: '#8b8fa8', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+        <div style={{ padding: '14px 20px', borderTop: '1px solid #004065', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+          <button onClick={onClose} style={{ background: 'none', border: '1px solid #004065', borderRadius: 8, padding: '8px 18px', color: '#6da8c5', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
           <button
             onClick={handleSave}
             disabled={saving || !form.square_footage}
-            style={{ background: form.square_footage ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : '#2a2f45', border: 'none', borderRadius: 8, padding: '8px 20px', color: form.square_footage ? '#fff' : '#555b75', fontSize: 13, fontWeight: 600, cursor: form.square_footage ? 'pointer' : 'not-allowed', opacity: saving ? 0.7 : 1 }}
+            style={{ background: form.square_footage ? 'linear-gradient(135deg, #A50050, #CD545B)' : '#004065', border: 'none', borderRadius: 8, padding: '8px 20px', color: form.square_footage ? '#fff' : '#3d7a99', fontSize: 13, fontWeight: 600, cursor: form.square_footage ? 'pointer' : 'not-allowed', opacity: saving ? 0.7 : 1 }}
           >
             {saving ? 'Saving…' : 'Save Project'}
           </button>
@@ -271,25 +271,25 @@ export default function History() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
       {/* Header */}
-      <div style={{ padding: '20px 28px 16px', borderBottom: '1px solid #2a2f45', flexShrink: 0 }}>
+      <div style={{ padding: '20px 28px 16px', borderBottom: '1px solid #004065', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
           <div>
             <h1 style={{ fontSize: 22, fontWeight: 700, color: '#f0f2ff', margin: 0 }}>Past Projects</h1>
-            <p style={{ fontSize: 13, color: '#555b75', margin: '3px 0 0' }}>
+            <p style={{ fontSize: 13, color: '#3d7a99', margin: '3px 0 0' }}>
               {projects.length} project{projects.length !== 1 ? 's' : ''} — used to calibrate the Deal Scorer
             </p>
           </div>
           <div style={{ display: 'flex', gap: 10 }}>
             <button
               onClick={downloadTemplate}
-              style={{ background: 'none', border: '1px solid #2a2f45', borderRadius: 8, padding: '8px 14px', color: '#8b8fa8', fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+              style={{ background: 'none', border: '1px solid #004065', borderRadius: 8, padding: '8px 14px', color: '#6da8c5', fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
             >
               <Download size={14} />
               CSV Template
             </button>
             <button
               onClick={() => fileInputRef.current?.click()}
-              style={{ background: '#1e2235', border: '1px solid #2a2f45', borderRadius: 8, padding: '8px 14px', color: '#f0f2ff', fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+              style={{ background: '#002d4a', border: '1px solid #004065', borderRadius: 8, padding: '8px 14px', color: '#f0f2ff', fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
             >
               <Upload size={14} />
               Import CSV
@@ -297,7 +297,7 @@ export default function History() {
             <input ref={fileInputRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={handleFileImport} />
             <button
               onClick={() => setShowAddModal(true)}
-              style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', border: 'none', borderRadius: 8, padding: '8px 16px', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+              style={{ background: 'linear-gradient(135deg, #A50050, #CD545B)', border: 'none', borderRadius: 8, padding: '8px 16px', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
             >
               <Plus size={14} />
               Add Project
@@ -310,13 +310,13 @@ export default function History() {
           <div style={{ display: 'flex', gap: 12 }}>
             {[
               { label: 'Total Projects',   value: projects.length, color: '#f0f2ff' },
-              { label: 'Avg Labor Hours',  value: avgHours  != null ? `${avgHours} hrs` : '—', color: '#6366f1' },
+              { label: 'Avg Labor Hours',  value: avgHours  != null ? `${avgHours} hrs` : '—', color: '#A50050' },
               { label: 'Avg Actual Bid',   value: avgBid    != null ? `$${avgBid.toLocaleString()}` : '—', color: '#f59e0b' },
               { label: 'Avg Profit',       value: avgProfit != null ? `$${avgProfit.toLocaleString()}` : '—', color: avgProfit > 0 ? '#22c55e' : '#ef4444' },
             ].map(({ label, value, color }) => (
-              <div key={label} style={{ background: '#1e2235', border: '1px solid #2a2f45', borderRadius: 10, padding: '12px 16px', minWidth: 130 }}>
+              <div key={label} style={{ background: '#002d4a', border: '1px solid #004065', borderRadius: 10, padding: '12px 16px', minWidth: 130 }}>
                 <div style={{ fontSize: 20, fontWeight: 700, color }}>{value}</div>
-                <div style={{ fontSize: 12, color: '#8b8fa8', marginTop: 2 }}>{label}</div>
+                <div style={{ fontSize: 12, color: '#6da8c5', marginTop: 2 }}>{label}</div>
               </div>
             ))}
           </div>
@@ -341,7 +341,7 @@ export default function History() {
               {importState === 'done' && `Imported ${importResult.inserted} project${importResult.inserted !== 1 ? 's' : ''}.${importResult.errors.length ? ` ${importResult.errors.length} row(s) skipped.` : ''}`}
               {importState === 'error' && `Import failed: ${importResult.errors[0]}`}
             </div>
-            <button onClick={() => { setImportState('idle'); setImportResult(null) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#555b75', padding: 0, marginLeft: 12 }}>
+            <button onClick={() => { setImportState('idle'); setImportResult(null) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#3d7a99', padding: 0, marginLeft: 12 }}>
               <X size={14} />
             </button>
           </div>
@@ -351,12 +351,12 @@ export default function History() {
       {/* Table */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '20px 28px' }}>
         {loading ? (
-          <div style={{ color: '#555b75', fontSize: 14 }}>Loading…</div>
+          <div style={{ color: '#3d7a99', fontSize: 14 }}>Loading…</div>
         ) : error ? (
           <div style={{ color: '#ef4444', fontSize: 14 }}>{error}</div>
         ) : projects.length === 0 ? (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 200, gap: 10, color: '#555b75' }}>
-            <Upload size={36} color="#2a2f45" />
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 200, gap: 10, color: '#3d7a99' }}>
+            <Upload size={36} color="#004065" />
             <div style={{ fontSize: 14 }}>No past projects yet.</div>
             <div style={{ fontSize: 13 }}>Import a CSV or add one manually to calibrate your Deal Scorer.</div>
           </div>
@@ -365,18 +365,18 @@ export default function History() {
             <thead>
               <tr>
                 {COL_DEFS.map(c => (
-                  <th key={c.key} style={{ textAlign: 'left', padding: '8px 12px', fontSize: 11, fontWeight: 600, color: '#555b75', textTransform: 'uppercase', letterSpacing: '0.5px', borderBottom: '1px solid #2a2f45' }}>
+                  <th key={c.key} style={{ textAlign: 'left', padding: '8px 12px', fontSize: 11, fontWeight: 600, color: '#3d7a99', textTransform: 'uppercase', letterSpacing: '0.5px', borderBottom: '1px solid #004065' }}>
                     {c.label}
                   </th>
                 ))}
-                <th style={{ width: 40, borderBottom: '1px solid #2a2f45' }} />
+                <th style={{ width: 40, borderBottom: '1px solid #004065' }} />
               </tr>
             </thead>
             <tbody>
               {projects.map((p, i) => (
                 <tr
                   key={p.id}
-                  style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)', borderBottom: '1px solid #2a2f45' }}
+                  style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)', borderBottom: '1px solid #004065' }}
                 >
                   {COL_DEFS.map(c => (
                     <td key={c.key} style={{ padding: '10px 12px', color: c.color ? c.color(p[c.key]) : '#f0f2ff' }}>
@@ -386,7 +386,7 @@ export default function History() {
                   <td style={{ padding: '10px 8px', textAlign: 'right' }}>
                     <button
                       onClick={() => handleDelete(p.id)}
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#555b75', padding: 4 }}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#3d7a99', padding: 4 }}
                     >
                       <Trash2 size={14} />
                     </button>

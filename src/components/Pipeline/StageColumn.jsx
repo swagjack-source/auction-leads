@@ -1,9 +1,9 @@
 import LeadCard from './LeadCard'
 
 const STAGE_COLORS = {
-  'New Lead':          '#6366f1',
-  'Contacted':         '#8b5cf6',
-  'In Talks':          '#06b6d4',
+  'New Lead':          '#A50050',
+  'Contacted':         '#CD545B',
+  'In Talks':          '#71C5E8',
   'Consult Scheduled': '#f59e0b',
   'Consult Completed': '#f97316',
   'Project Scheduled': '#22c55e',
@@ -13,7 +13,7 @@ const STAGE_COLORS = {
 }
 
 export default function StageColumn({ stage, leads, onCardClick }) {
-  const color = STAGE_COLORS[stage] || '#6366f1'
+  const color = STAGE_COLORS[stage] || '#A50050'
 
   return (
     <div style={{
@@ -38,13 +38,13 @@ export default function StageColumn({ stage, leads, onCardClick }) {
             background: color,
             flexShrink: 0,
           }} />
-          <span style={{ fontSize: 12, fontWeight: 600, color: '#8b8fa8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: '#6da8c5', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
             {stage}
           </span>
         </div>
         <span style={{
-          background: '#2a2f45',
-          color: '#8b8fa8',
+          background: '#004065',
+          color: '#6da8c5',
           fontSize: 11,
           fontWeight: 600,
           borderRadius: 10,
@@ -70,8 +70,8 @@ export default function StageColumn({ stage, leads, onCardClick }) {
             padding: '20px 12px',
             textAlign: 'center',
             fontSize: 12,
-            color: '#555b75',
-            border: '1px dashed #2a2f45',
+            color: '#3d7a99',
+            border: '1px dashed #004065',
             borderRadius: 8,
           }}>
             No leads
