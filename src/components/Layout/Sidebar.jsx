@@ -22,16 +22,16 @@ export default function Sidebar() {
       {/* Logo */}
       <div style={{ padding: '18px 16px 16px', borderBottom: '1px solid #004065' }}>
         <img
-          src="/logo.png"
+          src="/CT DenverSE logo - Black.png"
           alt="Caring Transitions Denver Southeast"
-          style={{
-            width: '100%',
-            borderRadius: 8,
-            background: '#fff',
-            padding: '10px 12px',
-            display: 'block',
-          }}
+          onError={e => { e.currentTarget.style.display = 'none'; e.currentTarget.nextSibling.style.display = 'block' }}
+          style={{ width: '100%', borderRadius: 8, background: '#fff', padding: '10px 12px', display: 'block' }}
         />
+        {/* Fallback shown while logo.png is missing */}
+        <div style={{ display: 'none', padding: '12px 10px' }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: '#f0f2ff', lineHeight: 1.2 }}>Caring Transitions</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#A50050', marginTop: 2 }}>Denver Southeast</div>
+        </div>
       </div>
 
       {/* Nav */}
