@@ -6,7 +6,7 @@ import { useAuth } from '../lib/AuthContext'
 import { useIsMobile } from '../hooks/useIsMobile'
 import logger from '../lib/logger'
 import { useTheme } from '../lib/ThemeContext'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useLocation } from 'react-router-dom'
 
 // ── Constants ─────────────────────────────────────────────────
 
@@ -542,11 +542,17 @@ function PastJobsCard({ dark, txt1, txt2, txt3, inputBg, inputBorder }) {
 
 // ── Main component ─────────────────────────────────────────────
 
-function DealScorerCalculator({ onBack }) {
+function DealScorerCalculator({ onBack, initialLead }) {
   const isMobile = useIsMobile()
   const { theme } = useTheme()
   const dark = theme === 'dark'
-  const [form, setForm] = useState({
+  const [form, setForm] = useState(() => initialLead ? {
+    sqft:        initialLead.square_footage?.toString() || '',
+    density:     initialLead.density        || 'Medium',
+    zipCode:     initialLead.zip_code       || '',
+    itemQuality: initialLead.item_quality_score ?? 7,
+    jobType:     initialLead.job_type       || 'Both',
+  } : {
     sqft: '', density: 'Medium', zipCode: '', itemQuality: 7, jobType: 'Both',
   })
   const [result, setResult]             = useState(null)
@@ -555,6 +561,21 @@ function DealScorerCalculator({ onBack }) {
 
   const [addedLead, setAddedLead]       = useState(null)
   const hasCalculated = useRef(false)
+
+  // Auto-calculate when opened from a lead with existing data
+  useEffect(() => {
+    if (initialLead?.square_footage) {
+      const r = calculateDeal({
+        sqft:        Number(initialLead.square_footage),
+        density:     initialLead.density        || 'Medium',
+        itemQuality: Number(initialLead.item_quality_score ?? 7),
+        jobType:     initialLead.job_type       || 'Both',
+        zipCode:     initialLead.zip_code       || '',
+      })
+      hasCalculated.current = true
+      setResult(r)
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Real-time recalc — fires after the first manual Calculate click
   useEffect(() => {
@@ -824,8 +845,10 @@ function ScoreChip({ score }) {
 export default function DealScorer() {
   const { organizationId } = useAuth()
   const [searchParams] = useSearchParams()
+  const location = useLocation()
   const fromLead = searchParams.get('lead')
-  const [mode, setMode] = useState(fromLead ? 'calculator' : 'list')
+  const leadState = location.state?.lead || null
+  const [mode, setMode] = useState(fromLead || leadState ? 'calculator' : 'list')
   const [scores, setScores] = useState([])
   const [loading, setLoading] = useState(true)
 
@@ -842,7 +865,7 @@ export default function DealScorer() {
   }
 
   if (mode === 'calculator') {
-    return <DealScorerCalculator onBack={() => { setMode('list'); fetchScores() }} />
+    return <DealScorerCalculator onBack={() => { setMode('list'); fetchScores() }} initialLead={leadState} />
   }
 
   const avgScore = scores.length

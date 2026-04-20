@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { X, MapPin, Phone, Clock, CheckSquare, Square, ChevronDown, MoreHorizontal, Calendar, FileText, CheckCircle, Pencil } from 'lucide-react'
+import { X, MapPin, Phone, Clock, CheckSquare, Square, ChevronDown, Calendar, FileText, CheckCircle, Pencil, Calculator, Trophy, RotateCcw } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { getScoreColor, getScoreLabel } from '../../lib/scoring'
 import { supabase } from '../../lib/supabase'
 import SendEstimateModal from './SendEstimateModal'
@@ -60,6 +61,7 @@ function SectionTitle({ children }) {
 }
 
 export default function LeadDrawer({ lead, onClose, onEdit, onMoveStatus, onChecklistChange }) {
+  const navigate = useNavigate()
   const [checklist, setChecklist] = useState(() => {
     if (Array.isArray(lead?.checklist) && lead.checklist.length > 0) return lead.checklist
     return DEFAULT_CHECKLIST.map(item => ({ label: item, done: false }))
@@ -100,6 +102,16 @@ export default function LeadDrawer({ lead, onClose, onEdit, onMoveStatus, onChec
     onMoveStatus?.(lead, newStatus)
   }
 
+  function primaryBtn(bg) {
+    return {
+      flex: 1.5, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      gap: 6, padding: '8px 12px', borderRadius: 9,
+      border: 'none', background: bg,
+      color: 'white', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+      fontFamily: 'inherit',
+    }
+  }
+
   function renderFooter() {
     const status = lead.status
 
@@ -132,6 +144,34 @@ export default function LeadDrawer({ lead, onClose, onEdit, onMoveStatus, onChec
       </button>
     )
 
+    if (status === 'Consult Scheduled') {
+      return (
+        <>
+          {callBtn}
+          <button
+            key="complete"
+            onClick={() => onMoveStatus?.(lead, 'Consult Completed')}
+            style={{
+              flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              gap: 6, padding: '8px 12px', borderRadius: 9,
+              border: '1px solid var(--line)', background: 'var(--panel)',
+              color: 'var(--ink-2)', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}
+          >
+            <CheckCircle size={13} strokeWidth={1.8} /> Mark Complete
+          </button>
+          <button
+            key="scorer"
+            onClick={() => navigate('/scorer', { state: { lead } })}
+            style={primaryBtn('#4A6FA5')}
+          >
+            <Calculator size={13} strokeWidth={1.8} /> Open Deal Scorer
+          </button>
+        </>
+      )
+    }
+
     if (status === 'Consult Completed') {
       return (
         <>
@@ -140,13 +180,7 @@ export default function LeadDrawer({ lead, onClose, onEdit, onMoveStatus, onChec
           <button
             key="estimate"
             onClick={() => setShowEstimateModal(true)}
-            style={{
-              flex: 1.5, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              gap: 6, padding: '8px 12px', borderRadius: 9,
-              border: 'none', background: '#A50050',
-              color: 'white', fontSize: 13, fontWeight: 600, cursor: 'pointer',
-              fontFamily: 'inherit',
-            }}
+            style={primaryBtn('#A50050')}
           >
             <FileText size={13} strokeWidth={1.8} /> Send Estimate
           </button>
@@ -162,13 +196,7 @@ export default function LeadDrawer({ lead, onClose, onEdit, onMoveStatus, onChec
           <button
             key="accept"
             onClick={handleMarkAccepted}
-            style={{
-              flex: 1.5, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              gap: 6, padding: '8px 12px', borderRadius: 9,
-              border: 'none', background: '#6A8A4A',
-              color: 'white', fontSize: 13, fontWeight: 600, cursor: 'pointer',
-              fontFamily: 'inherit',
-            }}
+            style={primaryBtn('#6A8A4A')}
           >
             <CheckCircle size={13} strokeWidth={1.8} /> Mark Accepted
           </button>
@@ -184,13 +212,7 @@ export default function LeadDrawer({ lead, onClose, onEdit, onMoveStatus, onChec
           <button
             key="schedule"
             onClick={() => setShowScheduleModal(true)}
-            style={{
-              flex: 1.5, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              gap: 6, padding: '8px 12px', borderRadius: 9,
-              border: 'none', background: '#C28A2A',
-              color: 'white', fontSize: 13, fontWeight: 600, cursor: 'pointer',
-              fontFamily: 'inherit',
-            }}
+            style={primaryBtn('#C28A2A')}
           >
             <Calendar size={13} strokeWidth={1.8} /> Add to Schedule
           </button>
@@ -198,6 +220,39 @@ export default function LeadDrawer({ lead, onClose, onEdit, onMoveStatus, onChec
       )
     }
 
+    if (status === 'Project Scheduled') {
+      return (
+        <>
+          {callBtn}
+          {noteBtn}
+          <button
+            key="won"
+            onClick={() => onMoveStatus?.(lead, 'Won')}
+            style={primaryBtn('#2F7A55')}
+          >
+            <Trophy size={13} strokeWidth={1.8} /> Mark Won
+          </button>
+        </>
+      )
+    }
+
+    if (status === 'Lost' || status === 'Backlog') {
+      return (
+        <>
+          {callBtn}
+          {noteBtn}
+          <button
+            key="reactivate"
+            onClick={() => onMoveStatus?.(lead, 'New Lead')}
+            style={primaryBtn('var(--accent)')}
+          >
+            <RotateCcw size={13} strokeWidth={1.8} /> Reactivate
+          </button>
+        </>
+      )
+    }
+
+    // Default: New Lead, Contacted, In Talks
     return (
       <>
         {callBtn}
@@ -205,15 +260,9 @@ export default function LeadDrawer({ lead, onClose, onEdit, onMoveStatus, onChec
         <button
           key="consult"
           onClick={onEdit}
-          style={{
-            flex: 1.5, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            gap: 6, padding: '8px 12px', borderRadius: 9,
-            border: 'none', background: 'var(--accent)',
-            color: 'white', fontSize: 13, fontWeight: 600, cursor: 'pointer',
-            fontFamily: 'inherit',
-          }}
+          style={primaryBtn('var(--accent)')}
         >
-          <Calendar size={13} strokeWidth={1.8} /> Schedule consult
+          <Calendar size={13} strokeWidth={1.8} /> Schedule Consult
         </button>
       </>
     )
