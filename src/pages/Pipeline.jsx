@@ -258,14 +258,19 @@ export default function Pipeline() {
   async function fetchLeads() {
     setLoading(true)
     setError(null)
-    const { data, error } = await supabase
-      .from('leads')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .range(0, 499)
-    if (error) logger.error('fetchLeads error', error)
-    const leads = data && data.length > 0 ? data : MOCK_LEADS
-    setLeads(leads.map(enrichLead))
+    try {
+      const { data, error } = await supabase
+        .from('leads')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .range(0, 499)
+      if (error) logger.error('fetchLeads error', error)
+      const leads = data && data.length > 0 ? data : MOCK_LEADS
+      setLeads(leads.map(enrichLead))
+    } catch (e) {
+      logger.error('fetchLeads threw', e)
+      setLeads(MOCK_LEADS.map(enrichLead))
+    }
     setLoading(false)
   }
 

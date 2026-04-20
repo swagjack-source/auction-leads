@@ -206,9 +206,13 @@ export default function Projects() {
 
   async function fetchLeads() {
     setLoading(true)
-    const { data } = await supabase.from('leads').select('*').order('created_at', { ascending: false })
-    const leads = data && data.length > 0 ? data : MOCK_LEADS
-    setLeads(leads.map(enrichLead))
+    try {
+      const { data } = await supabase.from('leads').select('*').order('created_at', { ascending: false })
+      const leads = data && data.length > 0 ? data : MOCK_LEADS
+      setLeads(leads.map(enrichLead))
+    } catch (e) {
+      setLeads(MOCK_LEADS.map(enrichLead))
+    }
     setLoading(false)
   }
 
