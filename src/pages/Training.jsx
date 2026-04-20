@@ -302,7 +302,7 @@ export default function Training() {
           <div>
             <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--ink-1)', margin: 0, letterSpacing: '-0.02em' }}>Training</h1>
             <p style={{ fontSize: 12.5, color: 'var(--ink-3)', margin: '2px 0 0' }}>
-              {completedCount} of {guides.length || 12} modules complete · Your progress
+              {completedCount} of {guides.length} modules complete · Your progress
             </p>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
