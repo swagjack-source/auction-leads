@@ -128,8 +128,8 @@ export default function Sidebar({ mobile, onClose }) {
         display: 'flex', alignItems: 'center', gap: 6,
       }}>
         <img
-          src={theme === 'dark' ? '/ctlogo-white.png' : '/CT DenverSE logo - Black.png'}
-          alt="Caring Transitions Denver Southeast"
+          src={theme === 'dark' ? '/homebase-logo-white.svg' : '/homebase-logo-black.svg'}
+          alt="Homebase"
           style={{ flex: 1, minWidth: 0, maxWidth: '100%', height: 'auto', display: 'block' }}
         />
         {mobile && (
