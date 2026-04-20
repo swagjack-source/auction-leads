@@ -111,18 +111,12 @@ export default function Login() {
         }} />
 
         {/* Brand head */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, position: 'relative' }}>
-          <div style={{
-            width: 40, height: 40, borderRadius: 10,
-            background: 'var(--accent)', color: 'white',
-            display: 'grid', placeItems: 'center',
-            fontWeight: 700, fontSize: 17, letterSpacing: '-0.02em',
-            boxShadow: '0 1px 0 rgba(255,255,255,0.2) inset, 0 2px 8px color-mix(in oklab, var(--accent) 40%, transparent)',
-          }}>A</div>
-          <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.1 }}>
-            <strong style={{ fontSize: 16, fontWeight: 600, color: 'var(--ink-1)', letterSpacing: '-0.01em' }}>AuctionCRM</strong>
-            <span style={{ fontSize: 11.5, color: 'var(--ink-3)', marginTop: 2 }}>Caring Transitions Denver SE</span>
-          </div>
+        <div style={{ position: 'relative' }}>
+          <img
+            src={isDark ? '/homebase-logo-white.svg' : '/homebase-logo-black.svg'}
+            alt="Homebase"
+            style={{ height: 28, width: 'auto' }}
+          />
         </div>
 
         {/* Brand body */}
@@ -236,7 +230,7 @@ export default function Login() {
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           fontSize: 11.5, color: 'var(--ink-3)',
         }}>
-          <span>© 2026 Caring Transitions Denver SE</span>
+          <span>© 2026 Homebase</span>
           <span style={{ display: 'flex', gap: 16 }}>
             <a href="#" style={{ color: 'var(--ink-3)', textDecoration: 'none' }}>Privacy</a>
             <a href="#" style={{ color: 'var(--ink-3)', textDecoration: 'none' }}>Terms</a>
@@ -279,25 +273,20 @@ export default function Login() {
         <div style={{ width: '100%', maxWidth: 380, display: 'flex', flexDirection: 'column' }}>
           {/* Mobile-only brand head */}
           <div className="login-mobile-head" style={{
-            display: 'none', alignItems: 'center', gap: 10, marginBottom: 28,
+            display: 'none', alignItems: 'center', marginBottom: 28,
           }}>
-            <div style={{
-              width: 32, height: 32, borderRadius: 8,
-              background: 'var(--accent)', color: 'white',
-              display: 'grid', placeItems: 'center',
-              fontWeight: 700, fontSize: 14,
-            }}>A</div>
-            <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.1 }}>
-              <strong style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink-1)' }}>AuctionCRM</strong>
-              <span style={{ fontSize: 10.5, color: 'var(--ink-3)', marginTop: 2 }}>Caring Transitions Denver SE</span>
-            </div>
+            <img
+              src={isDark ? '/homebase-logo-white.svg' : '/homebase-logo-black.svg'}
+              alt="Homebase"
+              style={{ height: 22, width: 'auto' }}
+            />
           </div>
 
           <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', color: 'var(--ink-1)', margin: '0 0 6px' }}>
             {mode === 'signup' ? 'Create an account' : 'Welcome back'}
           </h1>
           <p style={{ fontSize: 14, color: 'var(--ink-3)', margin: '0 0 28px' }}>
-            {mode === 'signup' ? 'Sign up to get started with AuctionCRM.' : 'Sign in to continue to your workspace.'}
+            {mode === 'signup' ? 'Sign up to get started with Homebase.' : 'Sign in to continue to your workspace.'}
           </p>
 
           {/* SSO buttons — sign-in only */}

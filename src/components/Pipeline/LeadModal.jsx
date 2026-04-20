@@ -29,9 +29,9 @@ function downloadICS(lead, memberName) {
   const start = new Date(lead.consult_at)
   const end   = new Date(start.getTime() + 3600000)
   const ics = [
-    'BEGIN:VCALENDAR', 'VERSION:2.0', 'CALSCALE:GREGORIAN', 'PRODID:-//AuctionCRM//EN',
+    'BEGIN:VCALENDAR', 'VERSION:2.0', 'CALSCALE:GREGORIAN', 'PRODID:-//Homebase//EN',
     'BEGIN:VEVENT',
-    `UID:${lead.id}@auctioncrm`,
+    `UID:${lead.id}@homebase`,
     `DTSTART:${fmtUTC(start)}`, `DTEND:${fmtUTC(end)}`,
     `SUMMARY:Consult: ${lead.name}`,
     `DESCRIPTION:${[memberName && `Assigned to: ${memberName}`, lead.address, lead.phone].filter(Boolean).join('\\n')}`,
