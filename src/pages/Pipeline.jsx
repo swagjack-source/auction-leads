@@ -232,6 +232,19 @@ export default function Pipeline() {
   const [draggingId, setDraggingId] = useState(null)
   const [hoverCol, setHoverCol] = useState(null)
   const hoverColRef = useRef(null)
+  const boardRef = useRef(null)
+
+  useEffect(() => {
+    const el = boardRef.current
+    if (!el) return
+    function onWheel(e) {
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return
+      e.preventDefault()
+      el.scrollLeft += e.deltaY
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
 
   useEffect(() => { fetchLeads() }, [])
 
@@ -409,7 +422,7 @@ export default function Pipeline() {
           <button className="btn btn-secondary" onClick={fetchLeads}>Retry</button>
         </div>
       ) : (
-        <div style={{ flex: 1, minHeight: 0, overflowX: 'auto', overflowY: 'hidden', padding: '6px 20px 20px' }}>
+        <div ref={boardRef} className="pipeline-board" style={{ flex: 1, minHeight: 0, overflowX: 'auto', overflowY: 'hidden', padding: '6px 20px 20px' }}>
           <div style={{
             display: 'grid',
             gridAutoFlow: 'column',
