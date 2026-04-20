@@ -5,6 +5,7 @@ import { useTheme } from './lib/ThemeContext'
 import ErrorBoundary from './components/ErrorBoundary'
 import PrivateRoute from './components/PrivateRoute'
 import Sidebar from './components/Layout/Sidebar'
+import Home from './pages/Home'
 import Pipeline from './pages/Pipeline'
 import DealScorer from './pages/DealScorer'
 import CalendarView from './pages/CalendarView'
@@ -25,6 +26,7 @@ import { useIsMobile } from './hooks/useIsMobile'
 import './index.css'
 
 const PAGE_TITLES = {
+  '/home':       'Home',
   '/':           'Pipeline',
   '/projects':   'Projects',
   '/scorer':     'Deal Scorer',
@@ -194,7 +196,8 @@ export default function App() {
                 <Routes>
                   <Route path="/login" element={<Login />} />
                   <Route element={<AppLayout />}>
-                    <Route path="/"          element={<PrivateRoute><Pipeline /></PrivateRoute>} />
+                    <Route path="/home"      element={<PrivateRoute><Home /></PrivateRoute>} />
+                  <Route path="/"          element={<PrivateRoute><Pipeline /></PrivateRoute>} />
                     <Route path="/scorer"    element={<PrivateRoute><DealScorer /></PrivateRoute>} />
                     <Route path="/calendar"  element={<PrivateRoute><CalendarView /></PrivateRoute>} />
                     <Route path="/contacts"  element={<PrivateRoute><Contacts /></PrivateRoute>} />

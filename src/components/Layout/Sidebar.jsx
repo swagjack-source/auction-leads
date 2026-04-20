@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { NavLink } from 'react-router-dom'
-import { Columns3, FolderOpen, CalendarDays, LayoutGrid, BookUser, Users, BookOpen, Image, Clock, X, Search, FileText, MoreHorizontal, LogOut } from 'lucide-react'
+import { Home, Columns3, FolderOpen, CalendarDays, LayoutGrid, BookUser, Users, BookOpen, Image, Clock, X, Search, FileText, MoreHorizontal, LogOut } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useTheme } from '../../lib/ThemeContext'
 import { useAuth } from '../../lib/AuthContext'
@@ -86,6 +86,7 @@ export default function Sidebar({ mobile, onClose }) {
   }, [])
 
   const mainNav = [
+    { to: '/home',      icon: Home,         label: 'Home'           },
     { to: '/',          icon: Columns3,     label: 'Pipeline',      badge: pipelineCount },
     { to: '/projects',  icon: FolderOpen,   label: 'Projects'       },
     { to: '/calendar',  icon: CalendarDays, label: 'Calendar',      badge: calendarCount },
