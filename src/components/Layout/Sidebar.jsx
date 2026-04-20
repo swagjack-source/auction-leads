@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { NavLink } from 'react-router-dom'
-import { Columns3, FolderOpen, CalendarDays, LayoutGrid, BookUser, Users, BookOpen, Image, Clock, X, Search, FileText, Bookmark, MoreHorizontal, LogOut } from 'lucide-react'
+import { Columns3, FolderOpen, CalendarDays, LayoutGrid, BookUser, Users, BookOpen, Image, Clock, X, Search, FileText, MoreHorizontal, LogOut } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useTheme } from '../../lib/ThemeContext'
 import { useAuth } from '../../lib/AuthContext'
@@ -99,7 +99,6 @@ export default function Sidebar({ mobile, onClose }) {
 
   const quickLinks = [
     { to: '/templates', icon: FileText, label: 'Templates' },
-    { to: '/saved',     icon: Bookmark, label: 'Saved views' },
   ]
 
   return (

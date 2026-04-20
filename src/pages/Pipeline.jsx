@@ -386,10 +386,10 @@ export default function Pipeline() {
         flexShrink: 0,
         display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12,
       }}>
-        <StatCard icon={Users}      label="Active Leads"   value={activeLeads.length}                           delta="+3"   deltaDir="up" sub="this week"   />
-        <StatCard icon={Trophy}     label="Won This Month"  value={wonLeads.length}                              delta="+1"   deltaDir="up" sub="$113.3k revenue"  />
-        <StatCard icon={Star}       label="Avg Deal Score" value={avgScore != null ? avgScore.toFixed(1) : '—'} delta="+0.4" deltaDir="up" sub="out of 10"   />
-        <StatCard icon={TrendingUp} label="Pipeline Value" value={pipelineValue > 0 ? `$${Math.round(pipelineValue/1000)}k` : '—'} delta="+12%" deltaDir="up" sub="weighted" />
+        <StatCard icon={Users}      label="Active Leads"   value={activeLeads.length}                           sub="active in pipeline" />
+        <StatCard icon={Trophy}     label="Won This Month"  value={wonLeads.length}                              sub="closed won" />
+        <StatCard icon={Star}       label="Avg Deal Score" value={avgScore != null ? avgScore.toFixed(1) : '—'} sub="out of 10" />
+        <StatCard icon={TrendingUp} label="Pipeline Value" value={pipelineValue > 0 ? `$${Math.round(pipelineValue/1000)}k` : '—'} sub="weighted" />
       </div>
 
       {/* Board header */}
