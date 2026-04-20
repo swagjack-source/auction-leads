@@ -412,17 +412,17 @@ export default function Pipeline() {
       />
 
       {/* Board */}
-      {loading ? (
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text3)', fontSize: 13 }}>
-          Loading leads…
-        </div>
-      ) : error ? (
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
-          <div style={{ color: '#ef4444', fontSize: 13 }}>{error}</div>
-          <button className="btn btn-secondary" onClick={fetchLeads}>Retry</button>
-        </div>
-      ) : (
-        <div ref={boardRef} className="pipeline-board" style={{ flex: 1, minHeight: 0, overflowX: 'auto', overflowY: 'hidden', padding: '6px 20px 20px' }}>
+      <div ref={boardRef} className="pipeline-board" style={{ flex: 1, minHeight: 0, overflowX: 'auto', overflowY: 'hidden', padding: '6px 20px 20px' }}>
+        {loading ? (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text3)', fontSize: 13 }}>
+            Loading leads…
+          </div>
+        ) : error ? (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 10 }}>
+            <div style={{ color: '#ef4444', fontSize: 13 }}>{error}</div>
+            <button className="btn btn-secondary" onClick={fetchLeads}>Retry</button>
+          </div>
+        ) : (
           <div style={{
             display: 'grid',
             gridAutoFlow: 'column',
@@ -449,8 +449,8 @@ export default function Pipeline() {
               />
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {drawerLead && (
         <LeadDrawer
