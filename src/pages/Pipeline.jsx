@@ -263,11 +263,7 @@ export default function Pipeline() {
       .select('*')
       .order('created_at', { ascending: false })
       .range(0, 499)
-    if (error) {
-      setError(error.message)
-      setLoading(false)
-      return
-    }
+    if (error) logger.error('fetchLeads error', error)
     const leads = data && data.length > 0 ? data : MOCK_LEADS
     setLeads(leads.map(enrichLead))
     setLoading(false)
