@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { calculateDeal } from '../lib/scoring'
 import { useAuth } from '../lib/AuthContext'
 import DealScorerModal from '../components/Pipeline/DealScorerModal'
+import { MOCK_LEADS } from '../lib/mockData'
 
 const JOB_FILTERS  = ['All', 'Clean Out', 'Auction', 'Both']
 const STATUS_FILTERS = ['All', 'Scored', 'Scheduled', 'Won', 'Lost']
@@ -206,7 +207,8 @@ export default function Projects() {
   async function fetchLeads() {
     setLoading(true)
     const { data } = await supabase.from('leads').select('*').order('created_at', { ascending: false })
-    setLeads((data || []).map(enrichLead))
+    const leads = data && data.length > 0 ? data : MOCK_LEADS
+    setLeads(leads.map(enrichLead))
     setLoading(false)
   }
 

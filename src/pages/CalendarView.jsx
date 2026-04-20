@@ -3,6 +3,7 @@ import { Calendar, Plus, Trash2, X, ExternalLink, Download, CalendarPlus, Buildi
 import { supabase } from '../lib/supabase'
 import { useTeam } from '../lib/TeamContext'
 import { useAuth } from '../lib/AuthContext'
+import { MOCK_LEADS } from '../lib/mockData'
 
 // ── Calendar export helpers ───────────────────────────────────
 
@@ -490,7 +491,8 @@ export default function CalendarView() {
       supabase.from('meetings').select('*, contacts(name, category)').order('date', { ascending: true }),
       supabase.from('contacts').select('*').order('name'),
     ])
-    setLeads(leadsData || [])
+    const mockConsults = MOCK_LEADS.filter(l => l.consult_at)
+    setLeads(leadsData && leadsData.length > 0 ? leadsData : mockConsults)
     setMeetings(meetingsData || [])
     setContacts(contactsData || [])
     setLoading(false)

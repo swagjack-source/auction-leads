@@ -9,6 +9,7 @@ import { calculateDeal } from '../lib/scoring'
 import { useTeam } from '../lib/TeamContext'
 import { useAuth } from '../lib/AuthContext'
 import logger from '../lib/logger'
+import { MOCK_LEADS } from '../lib/mockData'
 
 const JOB_FILTERS = ['All', 'Clean Out', 'Auction', 'Both']
 
@@ -267,7 +268,8 @@ export default function Pipeline() {
       setLoading(false)
       return
     }
-    setLeads((data || []).map(enrichLead))
+    const leads = data && data.length > 0 ? data : MOCK_LEADS
+    setLeads(leads.map(enrichLead))
     setLoading(false)
   }
 
