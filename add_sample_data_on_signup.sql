@@ -208,8 +208,6 @@ BEGIN
   INSERT INTO organization_members (organization_id, user_id, role)
   VALUES (new_org_id, NEW.id, 'owner');
 
-  PERFORM public.seed_sample_leads(new_org_id);
-
   RETURN NEW;
 END;
 $$;
