@@ -416,6 +416,7 @@ export default function Pipeline() {
             gridAutoColumns: 286,
             gap: 12,
             height: '100%',
+            width: 'max-content',
             alignItems: 'stretch',
           }}>
             {[...ACTIVE_STAGES, ...OUTCOME_STAGES].map(stage => (

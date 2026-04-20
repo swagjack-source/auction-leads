@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { X, MapPin, Phone, Clock, CheckSquare, Square, ChevronDown, Calendar, FileText, CheckCircle, Pencil, Calculator, Trophy, RotateCcw } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { getScoreColor, getScoreLabel } from '../../lib/scoring'
 import { supabase } from '../../lib/supabase'
+import { PIPELINE_STAGES } from '../../lib/constants'
 import SendEstimateModal from './SendEstimateModal'
 import ScheduleProjectModal from './ScheduleProjectModal'
 
@@ -63,11 +64,25 @@ function SectionTitle({ children }) {
 export default function LeadDrawer({ lead, onClose, onEdit, onMoveStatus, onChecklistChange }) {
   const navigate = useNavigate()
   const [checklist, setChecklist] = useState(() => {
+
     if (Array.isArray(lead?.checklist) && lead.checklist.length > 0) return lead.checklist
     return DEFAULT_CHECKLIST.map(item => ({ label: item, done: false }))
   })
   const [showEstimateModal, setShowEstimateModal] = useState(false)
   const [showScheduleModal, setShowScheduleModal] = useState(false)
+  const [showStageMenu, setShowStageMenu] = useState(false)
+  const stageMenuRef = useRef(null)
+
+  useEffect(() => {
+    if (!showStageMenu) return
+    function handleClick(e) {
+      if (stageMenuRef.current && !stageMenuRef.current.contains(e.target)) {
+        setShowStageMenu(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [showStageMenu])
 
   if (!lead) return null
 
@@ -359,18 +374,53 @@ export default function LeadDrawer({ lead, onClose, onEdit, onMoveStatus, onChec
 
           {/* Stage + owner */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
-            <button style={{
-              display: 'inline-flex', alignItems: 'center', gap: 5,
-              padding: '4px 10px', borderRadius: 999,
-              border: `1px solid ${stageTint}50`,
-              background: `${stageTint}12`,
-              color: stageTint, fontSize: 12, fontWeight: 600,
-              cursor: 'pointer', fontFamily: 'inherit',
-            }}>
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: stageTint, flexShrink: 0 }} />
-              {lead.status}
-              <ChevronDown size={11} strokeWidth={2} />
-            </button>
+            <div style={{ position: 'relative' }} ref={stageMenuRef}>
+              <button
+                onClick={() => setShowStageMenu(s => !s)}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 5,
+                  padding: '4px 10px', borderRadius: 999,
+                  border: `1px solid ${stageTint}50`,
+                  background: `${stageTint}12`,
+                  color: stageTint, fontSize: 12, fontWeight: 600,
+                  cursor: 'pointer', fontFamily: 'inherit',
+                }}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: stageTint, flexShrink: 0 }} />
+                {lead.status}
+                <ChevronDown size={11} strokeWidth={2} />
+              </button>
+              {showStageMenu && (
+                <div style={{
+                  position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 200,
+                  background: 'var(--panel)', border: '1px solid var(--line)',
+                  borderRadius: 10, boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
+                  minWidth: 200, overflow: 'hidden',
+                }}>
+                  {PIPELINE_STAGES.map(stage => {
+                    const tint = STAGE_TINT[stage] || '#6B7280'
+                    const active = stage === lead.status
+                    return (
+                      <button
+                        key={stage}
+                        onClick={() => { onMoveStatus?.(lead, stage); setShowStageMenu(false) }}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 8,
+                          width: '100%', padding: '8px 12px', border: 'none',
+                          background: active ? `${tint}14` : 'transparent',
+                          color: active ? tint : 'var(--ink-2)',
+                          fontSize: 12.5, fontWeight: active ? 600 : 400,
+                          cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit',
+                        }}
+                      >
+                        <span style={{ width: 7, height: 7, borderRadius: '50%', background: tint, flexShrink: 0 }} />
+                        {stage}
+                        {active && <span style={{ marginLeft: 'auto', fontSize: 11, color: tint }}>current</span>}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
             <span style={{ fontSize: 11.5, color: 'var(--ink-4)' }}>Owner · Margaret Reyes</span>
           </div>
         </div>
