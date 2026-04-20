@@ -234,12 +234,13 @@ button { font-family: inherit; }
   height: 8px;
 }
 .pipeline-board::-webkit-scrollbar-track {
-  background: var(--bg);
+  background: rgba(128, 128, 128, 0.15);
+  border-radius: 4px;
 }
 .pipeline-board::-webkit-scrollbar-thumb {
-  background: var(--line);
+  background: rgba(128, 128, 128, 0.5);
   border-radius: 4px;
 }
 .pipeline-board::-webkit-scrollbar-thumb:hover {
-  background: var(--ink-4);
+  background: rgba(128, 128, 128, 0.8);
 }
