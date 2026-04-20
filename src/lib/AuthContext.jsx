@@ -3,14 +3,9 @@ import { supabase } from './supabase'
 
 const AuthContext = createContext(null)
 
-async function fetchOrganizationId(userId) {
-  const { data } = await supabase
-    .from('organization_members')
-    .select('organization_id')
-    .eq('user_id', userId)
-    .limit(1)
-    .single()
-  return data?.organization_id ?? null
+async function fetchOrganizationId() {
+  const { data } = await supabase.rpc('user_organization_ids')
+  return data?.[0] ?? null
 }
 
 export function AuthProvider({ children }) {
@@ -20,13 +15,13 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
-      if (session?.user) fetchOrganizationId(session.user.id).then(setOrganizationId)
+      if (session?.user) fetchOrganizationId().then(setOrganizationId)
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
       if (session?.user) {
-        fetchOrganizationId(session.user.id).then(setOrganizationId)
+        fetchOrganizationId().then(setOrganizationId)
       } else {
         setOrganizationId(null)
       }
