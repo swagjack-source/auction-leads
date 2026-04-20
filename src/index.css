@@ -230,17 +230,22 @@ button { font-family: inherit; }
 }
 
 /* ── Pipeline board scrollbar ─────────────────────────────── */
+.pipeline-board {
+  scrollbar-width: thin;
+  scrollbar-color: #6b7280 #1e1e2a;
+}
 .pipeline-board::-webkit-scrollbar {
-  height: 8px;
+  height: 10px;
+  display: block;
 }
 .pipeline-board::-webkit-scrollbar-track {
-  background: rgba(128, 128, 128, 0.15);
-  border-radius: 4px;
+  background: #1e1e2a;
 }
 .pipeline-board::-webkit-scrollbar-thumb {
-  background: rgba(128, 128, 128, 0.5);
-  border-radius: 4px;
+  background: #6b7280;
+  border-radius: 5px;
+  min-width: 40px;
 }
 .pipeline-board::-webkit-scrollbar-thumb:hover {
-  background: rgba(128, 128, 128, 0.8);
+  background: #9ca3af;
 }
