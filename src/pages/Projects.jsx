@@ -193,7 +193,7 @@ function enrichLead(lead) {
 
 export default function Projects() {
   const { organizationId } = useAuth()
-  const [leads, setLeads]             = useState([])
+  const [leads, setLeads]             = useState(() => MOCK_LEADS.map(enrichLead))
   const [loading, setLoading]         = useState(true)
   const [search, setSearch]           = useState('')
   const [statusFilter, setStatusFilter] = useState('All')

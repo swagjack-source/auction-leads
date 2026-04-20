@@ -220,7 +220,7 @@ function enrichLead(lead) {
 
 export default function Pipeline() {
   const { organizationId } = useAuth()
-  const [leads, setLeads] = useState([])
+  const [leads, setLeads] = useState(() => MOCK_LEADS.map(enrichLead))
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [drawerLead, setDrawerLead] = useState(null)
