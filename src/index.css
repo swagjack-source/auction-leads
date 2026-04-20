@@ -230,22 +230,3 @@ button { font-family: inherit; }
 }
 
 /* ── Pipeline board scrollbar ─────────────────────────────── */
-.pipeline-board {
-  scrollbar-width: thin;
-  scrollbar-color: #6b7280 #1e1e2a;
-}
-.pipeline-board::-webkit-scrollbar {
-  height: 10px;
-  display: block;
-}
-.pipeline-board::-webkit-scrollbar-track {
-  background: #1e1e2a;
-}
-.pipeline-board::-webkit-scrollbar-thumb {
-  background: #6b7280;
-  border-radius: 5px;
-  min-width: 40px;
-}
-.pipeline-board::-webkit-scrollbar-thumb:hover {
-  background: #9ca3af;
-}
