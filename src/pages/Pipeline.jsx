@@ -1,10 +1,134 @@
-import { useState, useEffect } from 'react'
-import { Plus, Search } from 'lucide-react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { Search, Users, Trophy, Star, TrendingUp, Filter, ArrowUpDown, ChevronDown } from 'lucide-react'
 import StageColumn from '../components/Pipeline/StageColumn'
 import LeadModal from '../components/Pipeline/LeadModal'
-import { ACTIVE_STAGES, OUTCOME_STAGES } from '../data/mockLeads'
+import LeadDrawer from '../components/Pipeline/LeadDrawer'
+import { ACTIVE_STAGES, OUTCOME_STAGES } from '../lib/constants'
 import { supabase } from '../lib/supabase'
 import { calculateDeal } from '../lib/scoring'
+import { useTeam } from '../lib/TeamContext'
+import { useAuth } from '../lib/AuthContext'
+import logger from '../lib/logger'
+
+const JOB_FILTERS = ['All', 'Clean Out', 'Auction', 'Both']
+
+const OUTCOME_FILTERS = [
+  { key: 'Won',     label: 'Won',     color: 'var(--win)',  soft: 'var(--win-soft)'  },
+  { key: 'Lost',    label: 'Lost',    color: 'var(--lose)', soft: 'var(--lose-soft)' },
+  { key: 'Backlog', label: 'Backlog', color: 'var(--ink-3)',soft: 'var(--hover)'     },
+]
+
+function BoardHeader({ jobFilter, setJobFilter, outcomeFilter, setOutcomeFilter }) {
+  const { members } = useTeam()
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 10,
+      padding: '8px 20px 10px',
+      background: 'var(--panel)',
+      borderBottom: '1px solid var(--line)',
+      flexShrink: 0,
+      flexWrap: 'wrap',
+    }}>
+      {/* View switcher */}
+      <div style={{
+        display: 'inline-flex',
+        background: 'var(--panel)', border: '1px solid var(--line)',
+        borderRadius: 10, padding: 2, boxShadow: 'var(--shadow-1)',
+      }}>
+        {['Board', 'List', 'Calendar', 'Map'].map((v, i) => (
+          <button key={v} style={{
+            padding: '5px 12px', borderRadius: 8, border: 'none', cursor: i === 0 ? 'default' : 'pointer',
+            fontSize: 12, fontWeight: 600,
+            background: i === 0 ? 'var(--accent-soft)' : 'transparent',
+            color: i === 0 ? 'var(--accent-ink)' : 'var(--ink-3)',
+            fontFamily: 'inherit',
+          }}>{v}</button>
+        ))}
+      </div>
+
+      <div style={{ width: 1, height: 18, background: 'var(--line)' }} />
+
+      {/* Job type filters */}
+      <div style={{ display: 'flex', gap: 5 }}>
+        {JOB_FILTERS.map(f => (
+          <button key={f} onClick={() => setJobFilter(f)} style={{
+            padding: '5px 11px', borderRadius: 999,
+            border: '1px solid ' + (jobFilter === f ? '#C8CFD8' : 'var(--line)'),
+            background: jobFilter === f ? 'var(--accent-soft)' : 'var(--panel)',
+            color: jobFilter === f ? 'var(--accent-ink)' : 'var(--ink-2)',
+            fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+          }}>{f}</button>
+        ))}
+      </div>
+
+      <div style={{ width: 1, height: 18, background: 'var(--line)' }} />
+
+      {/* Outcome filters */}
+      <div style={{ display: 'flex', gap: 5 }}>
+        {OUTCOME_FILTERS.map(({ key, label, color, soft }) => {
+          const active = outcomeFilter === key
+          return (
+            <button key={key} onClick={() => setOutcomeFilter(active ? null : key)} style={{
+              padding: '5px 11px', borderRadius: 999,
+              border: `1px solid ${active ? color : 'var(--line)'}`,
+              background: active ? soft : 'var(--panel)',
+              color: active ? color : 'var(--ink-2)',
+              fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+            }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />
+              {label}
+            </button>
+          )
+        })}
+      </div>
+
+      <div style={{ flex: 1 }} />
+
+      {/* Controls */}
+      <button style={ctrlBtn}><Filter size={13} strokeWidth={1.8} /> Filter</button>
+      <button style={ctrlBtn}><ArrowUpDown size={13} strokeWidth={1.8} /> Sort</button>
+      <button style={ctrlBtn}>Group: Stage <ChevronDown size={12} strokeWidth={1.8} /></button>
+
+      {/* Team avatars */}
+      <div style={{ display: 'flex', marginLeft: 4 }}>
+        {members.slice(0, 4).map((m, i) => (
+          <div key={m.id} title={m.name} style={{
+            width: 24, height: 24, borderRadius: '50%',
+            background: m.color || '#6B7280',
+            color: 'white', fontSize: 9, fontWeight: 700,
+            display: 'grid', placeItems: 'center',
+            border: '2px solid var(--panel)',
+            marginLeft: i === 0 ? 0 : -7,
+            zIndex: members.length - i,
+          }}>
+            {(m.initials || m.name[0]).toUpperCase()}
+          </div>
+        ))}
+        {members.length > 4 && (
+          <div style={{
+            width: 24, height: 24, borderRadius: '50%',
+            background: 'var(--panel)', color: 'var(--ink-3)',
+            fontSize: 9, fontWeight: 700,
+            display: 'grid', placeItems: 'center',
+            border: '2px solid var(--panel)',
+            marginLeft: -7,
+            boxShadow: '0 0 0 1px var(--line)',
+          }}>+{members.length - 4}</div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+const ctrlBtn = {
+  display: 'inline-flex', alignItems: 'center', gap: 5,
+  padding: '6px 11px', borderRadius: 10,
+  border: '1px solid var(--line)', background: 'var(--panel)',
+  fontSize: 12, fontWeight: 500, cursor: 'pointer',
+  color: 'var(--ink-2)', boxShadow: 'var(--shadow-1)',
+  fontFamily: 'inherit',
+}
 
 const EMPTY_LEAD = {
   name: '',
@@ -19,20 +143,62 @@ const EMPTY_LEAD = {
   item_quality_score: 7,
   job_type: 'Both',
   notes: '',
+  lead_source: null,
 }
 
-function StatCard({ label, value, sub, color }) {
+function StatCard({ label, value, sub, delta, deltaDir, icon: Icon }) {
+  const spark = useMemo(() => Array.from({ length: 18 }, (_, i) =>
+    30 + Math.sin(i * 0.7) * 8 + Math.random() * 5 + i * 0.8
+  ), [])
+  const max = Math.max(...spark), min = Math.min(...spark)
+  const w = 72, h = 22
+  const pts = spark.map((v, i) => {
+    const x = (i / (spark.length - 1)) * w
+    const y = h - ((v - min) / (max - min)) * h
+    return `${x},${y}`
+  }).join(' ')
+
   return (
     <div style={{
-      background: '#002d4a',
-      border: '1px solid #004065',
-      borderRadius: 10,
-      padding: '14px 18px',
-      minWidth: 140,
+      background: 'var(--panel)',
+      border: '1px solid var(--line)',
+      borderRadius: 14,
+      padding: '14px 16px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 8,
+      boxShadow: 'var(--shadow-1)',
     }}>
-      <div style={{ fontSize: 22, fontWeight: 700, color: color || '#f0f2ff' }}>{value}</div>
-      <div style={{ fontSize: 12, color: '#6da8c5', marginTop: 2 }}>{label}</div>
-      {sub && <div style={{ fontSize: 11, color: '#3d7a99', marginTop: 2 }}>{sub}</div>}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{
+          width: 26, height: 26, borderRadius: 8,
+          background: 'var(--accent-soft)', color: 'var(--accent-ink)',
+          display: 'grid', placeItems: 'center',
+        }}>
+          <Icon size={14} strokeWidth={1.8} />
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 500 }}>{label}</div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 8 }}>
+        <div>
+          <div className="tnum" style={{ fontSize: 26, fontWeight: 600, letterSpacing: '-0.02em', lineHeight: 1, color: 'var(--ink-1)' }}>{value}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
+            {delta && (
+              <span style={{
+                fontSize: 11, fontWeight: 600,
+                color: deltaDir === 'up' ? 'var(--win)' : 'var(--lose)',
+                background: deltaDir === 'up' ? 'var(--win-soft)' : 'var(--lose-soft)',
+                padding: '1px 6px', borderRadius: 5,
+              }}>{deltaDir === 'up' ? '↑' : '↓'} {delta}</span>
+            )}
+            {sub && <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>{sub}</span>}
+          </div>
+        </div>
+        <svg width={w} height={h} style={{ flexShrink: 0 }}>
+          <polyline fill="none" stroke="var(--accent)" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" points={pts} />
+          <polyline fill="var(--accent)" fillOpacity="0.08" stroke="none" points={`0,${h} ${pts} ${w},${h}`} />
+        </svg>
+      </div>
     </div>
   )
 }
@@ -52,14 +218,28 @@ function enrichLead(lead) {
 }
 
 export default function Pipeline() {
+  const { organizationId } = useAuth()
   const [leads, setLeads] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [drawerLead, setDrawerLead] = useState(null)
   const [selectedLead, setSelectedLead] = useState(null)
   const [isNewLead, setIsNewLead] = useState(false)
+
   const [search, setSearch] = useState('')
+  const [jobFilter, setJobFilter] = useState('All')
+  const [outcomeFilter, setOutcomeFilter] = useState(null)
+  const [draggingId, setDraggingId] = useState(null)
+  const [hoverCol, setHoverCol] = useState(null)
+  const hoverColRef = useRef(null)
 
   useEffect(() => { fetchLeads() }, [])
+
+  useEffect(() => {
+    const btn = document.getElementById('global-new-lead')
+    if (btn) btn.onclick = openNewLead
+    return () => { if (btn) btn.onclick = null }
+  })
 
   async function fetchLeads() {
     setLoading(true)
@@ -68,6 +248,7 @@ export default function Pipeline() {
       .from('leads')
       .select('*')
       .order('created_at', { ascending: false })
+      .range(0, 499)
     if (error) {
       setError(error.message)
       setLoading(false)
@@ -77,26 +258,42 @@ export default function Pipeline() {
     setLoading(false)
   }
 
+  async function handleMoveStatus(lead, newStatus) {
+    const { error } = await supabase
+      .from('leads')
+      .update({ status: newStatus })
+      .eq('id', lead.id)
+    if (error) { logger.error('Move lead status failed', error); return }
+    setLeads(ls => ls.map(l => l.id === lead.id ? { ...l, status: newStatus } : l))
+    setDrawerLead(prev => prev?.id === lead.id ? { ...prev, status: newStatus } : prev)
+  }
+
   async function handleSave(updated) {
-    const { _scoreDetails, ...toSave } = updated
+    const { _scoreDetails, ...raw } = updated
+    const toSave = {
+      ...raw,
+      square_footage:     raw.square_footage     !== '' ? raw.square_footage     : null,
+      item_quality_score: raw.item_quality_score !== '' ? raw.item_quality_score : null,
+      crew_size:          raw.crew_size          !== '' ? raw.crew_size          : null,
+    }
 
     if (!updated.id) {
-      // Insert new lead
       const { data, error } = await supabase
         .from('leads')
-        .insert(toSave)
+        .insert({ ...toSave, organization_id: organizationId })
         .select()
         .single()
-      if (error) { console.error('Insert error:', error); return }
+      if (error) throw new Error(error.message)
       setLeads(ls => [enrichLead(data), ...ls])
     } else {
-      // Update existing lead
       const { error } = await supabase
         .from('leads')
         .update(toSave)
         .eq('id', updated.id)
-      if (error) { console.error('Update error:', error); return }
-      setLeads(ls => ls.map(l => l.id === updated.id ? enrichLead({ ...updated, ...toSave }) : l))
+      if (error) throw new Error(error.message)
+        const enriched = enrichLead({ ...updated, ...toSave })
+      setLeads(ls => ls.map(l => l.id === updated.id ? enriched : l))
+      setDrawerLead(prev => prev?.id === updated.id ? enriched : prev)
     }
     setSelectedLead(null)
     setIsNewLead(false)
@@ -107,135 +304,152 @@ export default function Pipeline() {
     setSelectedLead({ ...EMPTY_LEAD })
   }
 
-  const filtered = leads.filter(l =>
-    !search ||
-    l.name.toLowerCase().includes(search.toLowerCase()) ||
-    l.address?.toLowerCase().includes(search.toLowerCase()) ||
-    l.phone?.includes(search)
-  )
+  const filtered = useMemo(() => leads.filter(l => {
+    if (search && !l.name.toLowerCase().includes(search.toLowerCase()) &&
+        !l.address?.toLowerCase().includes(search.toLowerCase()) &&
+        !l.phone?.includes(search)) return false
+    if (jobFilter !== 'All' && l.job_type !== jobFilter) return false
+    if (outcomeFilter && l.status !== outcomeFilter) return false
+    return true
+  }), [leads, search, jobFilter, outcomeFilter])
 
-  const grouped = stage => filtered.filter(l => l.status === stage)
+  const grouped = useMemo(() => {
+    const map = {}
+    for (const l of filtered) {
+      if (!map[l.status]) map[l.status] = []
+      map[l.status].push(l)
+    }
+    return stage => map[stage] || []
+  }, [filtered])
 
-  // Stats
-  const activeLeads = leads.filter(l => [...ACTIVE_STAGES, 'Project Scheduled'].includes(l.status))
-  const wonLeads = leads.filter(l => l.status === 'Won')
-  const scoredLeads = leads.filter(l => l.deal_score)
-  const avgScore = scoredLeads.length
-    ? scoredLeads.reduce((a, b) => a + b.deal_score, 0) / scoredLeads.length
-    : 0
+  const handleDragOver = useCallback((stage, e) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    if (hoverColRef.current !== stage) {
+      hoverColRef.current = stage
+      setHoverCol(stage)
+    }
+  }, [])
+
+  const handleDragLeave = useCallback((stage) => {
+    if (hoverColRef.current === stage) {
+      hoverColRef.current = null
+      setHoverCol(null)
+    }
+  }, [])
+
+  const handleDrop = useCallback((stage, e) => {
+    e.preventDefault()
+    const id = e.dataTransfer.getData('text/plain')
+    if (id) {
+      setLeads(ls => {
+        const lead = ls.find(l => l.id === id)
+        if (lead && lead.status !== stage) handleMoveStatus(lead, stage)
+        return ls
+      })
+    }
+    setDraggingId(null)
+    hoverColRef.current = null
+    setHoverCol(null)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleDragStart = useCallback((id, e) => {
+    setDraggingId(id)
+    e.dataTransfer.effectAllowed = 'move'
+    try { e.dataTransfer.setData('text/plain', id) } catch {}
+  }, [])
+
+  const handleDragEnd = useCallback(() => {
+    setDraggingId(null)
+    hoverColRef.current = null
+    setHoverCol(null)
+  }, [])
+
+  const { activeLeads, wonLeads, avgScore, pipelineValue } = useMemo(() => {
+    const active = leads.filter(l => ACTIVE_STAGES.includes(l.status))
+    const won    = leads.filter(l => l.status === 'Won')
+    const scored = leads.filter(l => l.deal_score)
+    const avg    = scored.length
+      ? scored.reduce((a, b) => a + b.deal_score, 0) / scored.length
+      : null
+    const pipeline = active.reduce((sum, l) => sum + (l._scoreDetails?.recommendedBid || 0), 0)
+    return { activeLeads: active, wonLeads: won, avgScore: avg, pipelineValue: pipeline }
+  }, [leads])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
-      {/* Top bar */}
-      <div style={{
-        padding: '20px 28px 16px',
-        borderBottom: '1px solid #004065',
-        flexShrink: 0,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-          <div>
-            <h1 style={{ fontSize: 22, fontWeight: 700, color: '#f0f2ff', margin: 0 }}>Lead Pipeline</h1>
-            <p style={{ fontSize: 13, color: '#3d7a99', margin: '3px 0 0' }}>{leads.length} total leads</p>
-          </div>
-          <div style={{ display: 'flex', gap: 10 }}>
-            <div style={{ position: 'relative' }}>
-              <Search size={14} color="#3d7a99" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)' }} />
-              <input
-                placeholder="Search leads…"
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                style={{
-                  background: '#002d4a',
-                  border: '1px solid #004065',
-                  borderRadius: 8,
-                  padding: '8px 12px 8px 32px',
-                  fontSize: 13,
-                  color: '#f0f2ff',
-                  outline: 'none',
-                  width: 200,
-                }}
-              />
-            </div>
-            <button
-              onClick={openNewLead}
-              style={{
-                background: 'linear-gradient(135deg, #A50050, #CD545B)',
-                border: 'none',
-                borderRadius: 8,
-                padding: '8px 16px',
-                color: '#fff',
-                fontSize: 13,
-                fontWeight: 600,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-              }}>
-              <Plus size={14} />
-              Add Lead
-            </button>
-          </div>
-        </div>
 
-        {/* Stats row */}
-        <div style={{ display: 'flex', gap: 12 }}>
-          <StatCard label="Active Leads" value={activeLeads.length} />
-          <StatCard label="Closed Won" value={wonLeads.length} color="#22c55e" />
-          <StatCard label="Avg Deal Score" value={scoredLeads.length ? avgScore.toFixed(1) : '—'} color="#A50050" />
-          <StatCard
-            label="Est. Pipeline Value"
-            value={`$${(activeLeads.reduce((sum, l) => sum + (l._scoreDetails?.recommendedBid || 0), 0)).toLocaleString()}`}
-            sub="based on scored leads"
-            color="#f59e0b"
-          />
-        </div>
+      {/* Stats bar */}
+      <div style={{
+        padding: '14px 20px 8px',
+        borderBottom: '1px solid var(--line)',
+        flexShrink: 0,
+        display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12,
+      }}>
+        <StatCard icon={Users}      label="Active Leads"   value={activeLeads.length}                           delta="+3"   deltaDir="up" sub="this week"   />
+        <StatCard icon={Trophy}     label="Won This Month"  value={wonLeads.length}                              delta="+1"   deltaDir="up" sub="$113.3k revenue"  />
+        <StatCard icon={Star}       label="Avg Deal Score" value={avgScore != null ? avgScore.toFixed(1) : '—'} delta="+0.4" deltaDir="up" sub="out of 10"   />
+        <StatCard icon={TrendingUp} label="Pipeline Value" value={pipelineValue > 0 ? `$${Math.round(pipelineValue/1000)}k` : '—'} delta="+12%" deltaDir="up" sub="weighted" />
       </div>
+
+      {/* Board header */}
+      <BoardHeader
+        jobFilter={jobFilter} setJobFilter={setJobFilter}
+        outcomeFilter={outcomeFilter} setOutcomeFilter={setOutcomeFilter}
+      />
 
       {/* Board */}
       {loading ? (
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#3d7a99', fontSize: 14 }}>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text3)', fontSize: 13 }}>
           Loading leads…
         </div>
       ) : error ? (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
-          <div style={{ color: '#ef4444', fontSize: 14 }}>{error}</div>
-          <button onClick={fetchLeads} style={{ background: 'none', border: '1px solid #004065', borderRadius: 7, padding: '6px 14px', color: '#6da8c5', fontSize: 13, cursor: 'pointer' }}>
-            Retry
-          </button>
+          <div style={{ color: '#ef4444', fontSize: 13 }}>{error}</div>
+          <button className="btn btn-secondary" onClick={fetchLeads}>Retry</button>
         </div>
       ) : (
-        <div style={{ flex: 1, overflowX: 'auto', padding: '20px 28px', overflowY: 'auto' }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: '#3d7a99', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 14 }}>
-            Active Pipeline
-          </div>
-          <div style={{ display: 'flex', gap: 16, minWidth: 'max-content', marginBottom: 32 }}>
-            {ACTIVE_STAGES.map(stage => (
+        <div style={{ flex: 1, minHeight: 0, overflowX: 'auto', overflowY: 'hidden', padding: '6px 20px 20px' }}>
+          <div style={{
+            display: 'grid',
+            gridAutoFlow: 'column',
+            gridAutoColumns: 286,
+            gap: 12,
+            height: '100%',
+            alignItems: 'stretch',
+          }}>
+            {[...ACTIVE_STAGES, ...OUTCOME_STAGES].map(stage => (
               <StageColumn
                 key={stage}
                 stage={stage}
                 leads={grouped(stage)}
-                onCardClick={setSelectedLead}
-              />
-            ))}
-          </div>
-
-          <div style={{ fontSize: 11, fontWeight: 600, color: '#3d7a99', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 14 }}>
-            Outcomes
-          </div>
-          <div style={{ display: 'flex', gap: 16, minWidth: 'max-content' }}>
-            {OUTCOME_STAGES.map(stage => (
-              <StageColumn
-                key={stage}
-                stage={stage}
-                leads={grouped(stage)}
-                onCardClick={setSelectedLead}
+                onCardClick={setDrawerLead}
+                onMoveStatus={handleMoveStatus}
+                draggingId={draggingId}
+                isHover={hoverCol === stage}
+                onDragOver={e => handleDragOver(stage, e)}
+                onDragLeave={() => handleDragLeave(stage)}
+                onDrop={e => handleDrop(stage, e)}
+                onDragStart={(e, id) => handleDragStart(id, e)}
+                onDragEnd={handleDragEnd}
               />
             ))}
           </div>
         </div>
       )}
 
-      {/* Modal */}
+      {drawerLead && (
+        <LeadDrawer
+          lead={drawerLead}
+          onClose={() => setDrawerLead(null)}
+          onEdit={() => { setSelectedLead(drawerLead) }}
+          onMoveStatus={handleMoveStatus}
+          onChecklistChange={(id, checklist) =>
+            setLeads(ls => ls.map(l => l.id === id ? { ...l, checklist } : l))
+          }
+        />
+      )}
+
       {selectedLead && (
         <LeadModal
           lead={selectedLead}

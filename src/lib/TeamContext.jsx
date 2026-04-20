@@ -1,9 +1,11 @@
 import { createContext, useContext, useState, useEffect } from 'react'
 import { supabase } from './supabase'
+import { useAuth } from './AuthContext'
 
 const TeamContext = createContext({ members: [], refetch: () => {} })
 
 export function TeamProvider({ children }) {
+  const { session } = useAuth()
   const [members, setMembers] = useState([])
 
   async function refetch() {
@@ -11,7 +13,10 @@ export function TeamProvider({ children }) {
     setMembers(data || [])
   }
 
-  useEffect(() => { refetch() }, [])
+  useEffect(() => {
+    if (session) refetch()
+    else setMembers([])
+  }, [session])
 
   return (
     <TeamContext.Provider value={{ members, refetch }}>

@@ -1,29 +1,230 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 @import "tailwindcss";
 
-* {
+/* ── Design tokens ────────────────────────────────────────── */
+:root {
+  /* Canvas & surfaces */
+  --bg:      #F6F6F4;
+  --bg-2:    #FBFBF9;
+  --panel:   #FFFFFF;
+  --hover:   #F1F1EE;
+  --sidebar: var(--bg-2);
+
+  /* Ink */
+  --ink-1: #14161A;
+  --ink-2: #3A3E46;
+  --ink-3: #6B7280;
+  --ink-4: #9AA0AB;
+
+  /* Lines */
+  --line:   #E8E8E6;
+  --line-2: #EFEFEC;
+
+  /* Accent — slate-blue */
+  --accent:       #3E5C86;
+  --accent-ink:   #2B4468;
+  --accent-soft:  #EAF0F8;
+  --accent-soft-2:#DCE6F2;
+
+  /* Semantic */
+  --win:       #2F7A55;
+  --win-soft:  #E6F1EB;
+  --lose:      #A14646;
+  --lose-soft: #F3E4E4;
+  --warn:      #8A6A1F;
+  --warn-soft: #F4ECD8;
+
+  /* Job-type badge tokens */
+  --b-cleanout-bg: #EDE9DF; --b-cleanout-fg: #6A5A2C;
+  --b-auction-bg:  #E3EAE3; --b-auction-fg:  #355C3E;
+  --b-both-bg:     #E6E1EE; --b-both-fg:     #534680;
+
+  /* Scrollbar */
+  --scrollbar: #D9D9D5;
+  --scrollbar-hover: #C5C5C0;
+
+  /* Chrome */
+  --topbar-bg: rgba(246,246,244,0.85);
+  --overlay: rgba(20,22,26,0.28);
+  --overlay-heavy: rgba(20,22,26,0.4);
+
+  /* Shadows */
+  --shadow-1: 0 1px 0 rgba(20,22,26,0.03), 0 1px 2px rgba(20,22,26,0.04);
+  --shadow-2: 0 2px 4px rgba(20,22,26,0.05), 0 8px 20px rgba(20,22,26,0.07);
+  --shadow-lg: 0 24px 70px rgba(20,22,26,0.22);
+
+  /* Radius */
+  --radius-xs: 5px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+
+  /* Legacy aliases — keep existing components working */
+  --bg0:          var(--bg);
+  --bg1:          var(--panel);
+  --bg2:          var(--panel);
+  --bg3:          var(--bg);
+  --border:       var(--line);
+  --border-subtle:var(--line-2);
+  --text1:        var(--ink-1);
+  --text2:        var(--ink-2);
+  --text3:        var(--ink-3);
+  --stripe:       rgba(20,22,26,0.025);
+  --nav-hover:    var(--hover);
+  --nav-active:   var(--accent-soft);
+  --primary:       #A50050;
+  --primary-hover: #BF006A;
+  --primary-muted: rgba(165,0,80,0.08);
+  --primary-glow:  rgba(165,0,80,0.18);
+  --shadow-sm:  var(--shadow-1);
+  --shadow-md:  var(--shadow-2);
+}
+
+/* ── Dark mode ────────────────────────────────────────────── */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg:      #15171B;
+  --bg-2:    #1A1C21;
+  --panel:   #1E2027;
+  --hover:   #24272D;
+  --ink-1:   #ECEDEF;
+  --ink-2:   #D8DADF;
+  --ink-3:   #9AA0AB;
+  --ink-4:   #6E7480;
+  --line:    #2A2D34;
+  --line-2:  #24272D;
+  --accent:       #7FA0C9;
+  --accent-ink:   #B6CBE3;
+  --accent-soft:  #23304A;
+  --accent-soft-2:#2B3C5C;
+  --win:       #6DBF92;
+  --win-soft:  #1E352A;
+  --lose:      #D68A8A;
+  --lose-soft: #3A2424;
+  --warn:      #D9B667;
+  --warn-soft: #362C18;
+  --b-cleanout-bg: #302B1F; --b-cleanout-fg: #D4BE88;
+  --b-auction-bg:  #1F2E25; --b-auction-fg:  #8BC29C;
+  --b-both-bg:     #2A2540; --b-both-fg:     #BAA8E5;
+  --scrollbar: #3A3D45;
+  --scrollbar-hover: #50535C;
+  --topbar-bg: rgba(21,23,27,0.85);
+  --overlay: rgba(0,0,0,0.5);
+  --overlay-heavy: rgba(0,0,0,0.65);
+  --shadow-1: 0 1px 0 rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.35);
+  --shadow-2: 0 2px 4px rgba(0,0,0,0.4), 0 8px 20px rgba(0,0,0,0.5);
+  --shadow-lg: 0 24px 70px rgba(0,0,0,0.5);
+  --stripe: rgba(255,255,255,0.03);
+}
+
+/* ── Base ─────────────────────────────────────────────────── */
+*, *::before, *::after {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
 }
 
+html, body { height: 100%; }
+
 body {
-  background-color: #001929;
-  color: #f0f2ff;
+  background: var(--bg);
+  color: var(--ink-1);
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+  letter-spacing: -0.005em;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+/* ── Typography helpers ───────────────────────────────────── */
+.mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+.tnum { font-variant-numeric: tabular-nums; }
+
+/* ── Focus ring ───────────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
-::-webkit-scrollbar-track {
-  background: #00263E;
+
+/* ── Scrollbar ────────────────────────────────────────────── */
+::-webkit-scrollbar        { width: 8px; height: 8px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  { background: var(--scrollbar); border-radius: 8px; border: 2px solid var(--bg); }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); }
+
+/* ── Animations ───────────────────────────────────────────── */
+@keyframes fadein {
+  from { opacity: 0 }
+  to   { opacity: 1 }
 }
-::-webkit-scrollbar-thumb {
-  background: #004065;
-  border-radius: 3px;
+@keyframes popin {
+  from { transform: translate(-50%, -48%) scale(.96); opacity: 0 }
+  to   { transform: translate(-50%, -50%) scale(1);  opacity: 1 }
 }
-::-webkit-scrollbar-thumb:hover {
-  background: #3d7a99;
+@keyframes slidein {
+  from { transform: translateX(24px); opacity: 0 }
+  to   { transform: translateX(0);    opacity: 1 }
+}
+
+/* ── Button system ────────────────────────────────────────── */
+button { font-family: inherit; }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s, box-shadow 0.12s, opacity 0.12s, transform 0.1s;
+  user-select: none;
+  white-space: nowrap;
+}
+.btn:active { transform: scale(0.97); }
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+  padding: 8px 16px;
+  box-shadow: 0 1px 2px rgba(62,92,134,0.25);
+}
+.btn-primary:hover {
+  background: var(--accent-ink);
+  box-shadow: 0 3px 10px rgba(62,92,134,0.3);
+}
+
+.btn-secondary {
+  background: var(--panel);
+  color: var(--ink-2);
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-1);
+}
+.btn-secondary:hover {
+  background: var(--hover);
+  border-color: var(--ink-4);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--ink-3);
+  padding: 7px 12px;
+}
+.btn-ghost:hover {
+  background: var(--hover);
+  color: var(--ink-1);
+}
+
+/* ── Card base ────────────────────────────────────────────── */
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-1);
 }

@@ -61,6 +61,17 @@ export function calculateDeal({ sqft, density, itemQuality, jobType, zipCode }) 
   if (jobType === 'Auction') recommendedBid = rawBid * AUCTION_DISCOUNT
   if (jobType === 'Both') recommendedBid = rawBid * 1.15  // premium for full-service
 
+  // Item quality affects auction revenue potential:
+  // quality 1 = 0.75x, quality 5 ≈ 0.97x, quality 7 ≈ 1.08x, quality 10 = 1.25x
+  const qualityFactor = 0.75 + (itemQuality - 1) * (0.5 / 9)
+  if (jobType === 'Auction') {
+    recommendedBid = recommendedBid * qualityFactor
+  } else if (jobType === 'Both') {
+    // Auction portion (~half the value) is quality-sensitive
+    recommendedBid = recommendedBid * (0.5 + qualityFactor * 0.5)
+  }
+  // Clean Out: quality doesn't affect the service fee
+
   recommendedBid = Math.round(recommendedBid / 100) * 100  // round to nearest $100
 
   const estimatedProfit = recommendedBid - totalCost
@@ -121,6 +132,31 @@ export function calculateDeal({ sqft, density, itemQuality, jobType, zipCode }) 
       jobType:  { raw: jobTypeScore,                        weight: WEIGHTS.jobType, weighted: Math.round(jobTypeScore * WEIGHTS.jobType * 10) / 10 },
     },
   }
+}
+
+// ── Crew & scheduling estimates ───────────────────────────────
+
+// Estimated crew size needed based on job parameters.
+// Override with real data via lead.crew_size once you have it.
+export function estimateCrew(sqft, density, jobType) {
+  if (!sqft || !density || !jobType) return 2
+  const size = getSizeBucket(Number(sqft))
+  let crew = { Small: 2, Medium: 3, Large: 5 }[size]
+  if (density === 'High')   crew += 1
+  if (jobType === 'Auction') crew += 1
+  if (jobType === 'Both')    crew += 1
+  return crew
+}
+
+// Estimated project duration in calendar days given a crew size.
+export function estimateProjectDays(sqft, density, jobType, crewSize) {
+  if (!sqft || !density || !jobType) return 1
+  const hours = estimateLabourHours(Number(sqft), density)
+  const adjusted = jobType === 'Both' ? hours * 1.4
+                 : jobType === 'Auction' ? hours * 1.2
+                 : hours
+  const crew = crewSize || estimateCrew(sqft, density, jobType)
+  return Math.max(1, Math.ceil(adjusted / (crew * 8)))
 }
 
 export function getScoreColor(score) {
