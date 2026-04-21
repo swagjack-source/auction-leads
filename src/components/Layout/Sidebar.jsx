@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { NavLink } from 'react-router-dom'
-import { Home, Columns3, FolderOpen, CalendarDays, LayoutGrid, BookUser, Users, BookOpen, Image, Clock, X, Search, FileText, LogOut, Gavel, Package, ReceiptText, Bookmark } from 'lucide-react'
+import { Home, Columns3, FolderOpen, CalendarDays, BookUser, Users, BookOpen, Image, X, Search, FileText, LogOut, Gavel, Package, ReceiptText, Bookmark, Bell } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useTheme } from '../../lib/ThemeContext'
 import { useAuth } from '../../lib/AuthContext'
@@ -90,19 +90,18 @@ export default function Sidebar({ mobile, onClose }) {
     { to: '/',          icon: Columns3,     label: 'Pipeline',      badge: pipelineCount },
     { to: '/projects',  icon: FolderOpen,   label: 'Projects'       },
     { to: '/calendar',  icon: CalendarDays, label: 'Calendar',      badge: calendarCount },
-    { to: '/schedule',  icon: LayoutGrid,   label: 'Schedule'       },
     { to: '/contacts',  icon: BookUser,     label: 'Contacts'       },
     { to: '/employees', icon: Users,        label: 'Employees'      },
     { to: '/training',  icon: BookOpen,     label: 'Training'       },
     { to: '/library',   icon: Image,        label: 'Library'        },
-    { to: '/history',   icon: Clock,        label: 'Past Projects'  },
+    { to: '/expenses',  icon: ReceiptText,  label: 'Expenses'       },
+    { to: '/inventory', icon: Package,      label: 'Inventory'      },
+    { to: '/ctbids',    icon: Gavel,        label: 'CTBids'         },
+    { to: '/activity',  icon: Bell,         label: 'Activity'       },
   ]
 
   const quickLinks = [
-    { to: '/templates', icon: FileText,    label: 'Templates' },
-    { to: '/expenses',  icon: ReceiptText, label: 'Expenses'  },
-    { to: '/inventory', icon: Package,     label: 'Inventory' },
-    { to: '/ctbids',    icon: Gavel,       label: 'CTBids'    },
+    { to: '/templates', icon: FileText,    label: 'Templates'  },
     { to: '/saved',     icon: Bookmark,    label: 'Saved Views'},
   ]
 

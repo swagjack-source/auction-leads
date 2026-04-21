@@ -8,15 +8,13 @@ import Sidebar from './components/Layout/Sidebar'
 import Home from './pages/Home'
 import Pipeline from './pages/Pipeline'
 import DealScorer from './pages/DealScorer'
-import CalendarView from './pages/CalendarView'
+import CalendarPage from './pages/CalendarPage'
 import Contacts from './pages/Contacts'
-import Schedule from './pages/Schedule'
-import History from './pages/History'
 import Projects from './pages/Projects'
 import Employees from './pages/Employees'
 import Training from './pages/Training'
 import Library from './pages/Library'
-import Inbox from './pages/Inbox'
+import Activity from './pages/Activity'
 import Templates from './pages/Templates'
 import Expenses from './pages/Expenses'
 import Inventory from './pages/Inventory'
@@ -34,14 +32,12 @@ const PAGE_TITLES = {
   '/':           'Pipeline',
   '/projects':   'Projects',
   '/scorer':     'Deal Scorer',
-  '/calendar':   'Consult Calendar',
+  '/calendar':   'Calendar',
   '/contacts':   'Contacts',
-  '/schedule':   'Project Schedule',
-  '/history':    'Past Projects',
   '/employees':  'Employees',
   '/training':   'Training',
   '/library':    'Library',
-  '/inbox':      'Inbox',
+  '/activity':   'Activity',
   '/templates':  'Templates',
   '/expenses':   'Expenses',
   '/inventory':  'Inventory',
@@ -55,7 +51,7 @@ function Topbar({ onMenuClick, isMobile }) {
   const { theme, toggle } = useTheme()
   const title = PAGE_TITLES[location.pathname] || 'Workspace'
   const isPipeline = location.pathname === '/'
-  const isProjects = location.pathname === '/projects'
+  const isProjects = location.pathname.startsWith('/projects')
 
   return (
     <header style={{
@@ -185,7 +181,7 @@ function AppLayout() {
 
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <Topbar onMenuClick={() => setSidebarOpen(true)} isMobile={isMobile} />
-        <main style={{ flex: 1, overflow: 'hidden' }}>
+        <main style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           <Outlet />
         </main>
       </div>
@@ -205,17 +201,15 @@ export default function App() {
                   <Route path="/login" element={<Login />} />
                   <Route element={<AppLayout />}>
                     <Route path="/home"      element={<PrivateRoute><Home /></PrivateRoute>} />
-                  <Route path="/"          element={<PrivateRoute><Pipeline /></PrivateRoute>} />
+                    <Route path="/"          element={<PrivateRoute><Pipeline /></PrivateRoute>} />
                     <Route path="/scorer"    element={<PrivateRoute><DealScorer /></PrivateRoute>} />
-                    <Route path="/calendar"  element={<PrivateRoute><CalendarView /></PrivateRoute>} />
+                    <Route path="/calendar"  element={<PrivateRoute><CalendarPage /></PrivateRoute>} />
                     <Route path="/contacts"  element={<PrivateRoute><Contacts /></PrivateRoute>} />
-                    <Route path="/schedule"  element={<PrivateRoute><Schedule /></PrivateRoute>} />
                     <Route path="/projects"  element={<PrivateRoute><Projects /></PrivateRoute>} />
-                    <Route path="/history"   element={<PrivateRoute><History /></PrivateRoute>} />
                     <Route path="/employees" element={<PrivateRoute><Employees /></PrivateRoute>} />
                     <Route path="/training"  element={<PrivateRoute><Training /></PrivateRoute>} />
                     <Route path="/library"   element={<PrivateRoute><Library /></PrivateRoute>} />
-                    <Route path="/inbox"     element={<PrivateRoute><Inbox /></PrivateRoute>} />
+                    <Route path="/activity"  element={<PrivateRoute><Activity /></PrivateRoute>} />
                     <Route path="/templates" element={<PrivateRoute><Templates /></PrivateRoute>} />
                     <Route path="/expenses"  element={<PrivateRoute><Expenses /></PrivateRoute>} />
                     <Route path="/inventory" element={<PrivateRoute><Inventory /></PrivateRoute>} />

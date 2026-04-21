@@ -61,6 +61,18 @@
   --radius-lg: 16px;
   --radius-xl: 20px;
 
+  /* Pipeline stage soft backgrounds */
+  --stage-new-soft:       #EFEFEB;
+  --stage-contacted-soft: #ECEEF2;
+  --stage-talks-soft:     #E6EDF6;
+  --stage-sched-soft:     #E4ECF6;
+  --stage-done-soft:      #ECE6F4;
+  --stage-accepted-soft:  #ECF1E2;
+  --stage-project-soft:   #F5ECD6;
+  --stage-won-soft:       #E3EEE8;
+  --stage-lost-soft:      #F1E1E1;
+  --stage-backlog-soft:   #F1F1EE;
+
   /* Legacy aliases — keep existing components working */
   --bg0:          var(--bg);
   --bg1:          var(--panel);
@@ -118,6 +130,18 @@
   --shadow-2: 0 2px 4px rgba(0,0,0,0.4), 0 8px 20px rgba(0,0,0,0.5);
   --shadow-lg: 0 24px 70px rgba(0,0,0,0.5);
   --stripe: rgba(255,255,255,0.03);
+
+  /* Pipeline stage soft backgrounds — dark mode */
+  --stage-new-soft:       #252520;
+  --stage-contacted-soft: #1E2230;
+  --stage-talks-soft:     #192238;
+  --stage-sched-soft:     #1A2440;
+  --stage-done-soft:      #251D35;
+  --stage-accepted-soft:  #1A2A1E;
+  --stage-project-soft:   #2A2210;
+  --stage-won-soft:       #182518;
+  --stage-lost-soft:      #2A1818;
+  --stage-backlog-soft:   #222228;
 }
 
 /* ── Base ─────────────────────────────────────────────────── */
@@ -230,5 +254,9 @@ button { font-family: inherit; }
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-1);
 }
+
+/* ── Kanban card ──────────────────────────────────────────── */
+.kanban-card { will-change: transform; }
+.kanban-card:active { cursor: grabbing; }
 
 /* ── Pipeline board scrollbar ─────────────────────────────── */

@@ -368,7 +368,7 @@ export default function Schedule() {
   function goToday()   { const t = new Date(); t.setDate(1); setViewDate(t) }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', background: 'var(--bg)' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden', background: 'var(--bg)' }}>
 
       {/* ── Header ───────────────────────────────────────────── */}
       <div style={{ padding: '16px 28px', borderBottom: '1px solid var(--line)', flexShrink: 0, background: 'var(--panel)' }}>

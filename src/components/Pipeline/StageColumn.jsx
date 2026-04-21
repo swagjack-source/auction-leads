@@ -3,17 +3,17 @@ import { Plus, MoreHorizontal } from 'lucide-react'
 import LeadCard from './LeadCard'
 
 export const STAGE_META = {
-  'New Lead':          { tint: '#8A8A80', soft: '#EFEFEB' },
-  'Contacted':         { tint: '#6B7A8F', soft: '#ECEEF2' },
-  'In Talks':          { tint: '#3E5C86', soft: '#E6EDF6' },
-  'Consult Scheduled': { tint: '#4A6FA5', soft: '#E4ECF6' },
-  'Consult Completed': { tint: '#7A5CA5', soft: '#ECE6F4' },
-  'Estimate Sent':     { tint: '#A50050', soft: '#F8E6EF' },
-  'Project Accepted':  { tint: '#6A8A4A', soft: '#ECF1E2' },
-  'Project Scheduled': { tint: '#C28A2A', soft: '#F5ECD6' },
-  'Won':               { tint: '#2F7A55', soft: '#E3EEE8' },
-  'Lost':              { tint: '#A14646', soft: '#F1E1E1' },
-  'Backlog':           { tint: '#6B7280', soft: '#F1F1EE' },
+  'New Lead':          { tint: '#8A8A80', soft: 'var(--stage-new-soft)'       },
+  'Contacted':         { tint: '#6B7A8F', soft: 'var(--stage-contacted-soft)' },
+  'In Talks':          { tint: '#3E5C86', soft: 'var(--stage-talks-soft)'     },
+  'Consult Scheduled': { tint: '#4A6FA5', soft: 'var(--stage-sched-soft)'     },
+  'Consult Completed': { tint: '#7A5CA5', soft: 'var(--stage-done-soft)'      },
+  'Estimate Sent':     { tint: '#A50050', soft: 'var(--stage-new-soft)'       },
+  'Project Accepted':  { tint: '#6A8A4A', soft: 'var(--stage-accepted-soft)'  },
+  'Project Scheduled': { tint: '#C28A2A', soft: 'var(--stage-project-soft)'   },
+  'Won':               { tint: '#2F7A55', soft: 'var(--stage-won-soft)'       },
+  'Lost':              { tint: '#A14646', soft: 'var(--stage-lost-soft)'      },
+  'Backlog':           { tint: '#6B7280', soft: 'var(--stage-backlog-soft)'   },
 }
 
 const STAGE_DISPLAY = {
@@ -26,7 +26,7 @@ const StageColumn = memo(function StageColumn({
   onDragOver, onDragLeave, onDrop,
   onDragStart, onDragEnd,
 }) {
-  const meta = STAGE_META[stage] || { tint: '#9CA3AF', soft: '#E5E7EB' }
+  const meta = STAGE_META[stage] || { tint: '#9CA3AF', soft: 'var(--stage-backlog-soft)' }
   const displayName = STAGE_DISPLAY[stage] || stage
 
   const totalValue = leads.reduce((s, l) => s + (l._scoreDetails?.recommendedBid || 0), 0)
@@ -59,13 +59,15 @@ const StageColumn = memo(function StageColumn({
         <span style={{
           width: 8, height: 8, borderRadius: '50%',
           background: meta.tint,
-          boxShadow: `0 0 0 3px ${meta.soft}`,
+          boxShadow: `0 0 0 3px color-mix(in oklab, ${meta.tint} 20%, var(--bg-2))`,
           flexShrink: 0,
         }} />
         <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink-1)', flex: 1 }}>{displayName}</span>
         <span style={{
-          fontSize: 11, fontWeight: 600, color: 'var(--ink-2)',
-          background: meta.soft, padding: '1px 7px', borderRadius: 999,
+          fontSize: 11, fontWeight: 600, color: 'var(--ink-1)',
+          background: `color-mix(in oklab, ${meta.tint} 22%, var(--panel))`,
+          border: `1px solid color-mix(in oklab, ${meta.tint} 18%, var(--line))`,
+          padding: '1px 7px', borderRadius: 999,
         }}>{leads.length}</span>
         <button onClick={e => e.stopPropagation()} style={iconBtn}>
           <Plus size={14} strokeWidth={2} />

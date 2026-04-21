@@ -4,8 +4,10 @@ import StageColumn from '../components/Pipeline/StageColumn'
 import LeadModal from '../components/Pipeline/LeadModal'
 import LeadDrawer from '../components/Pipeline/LeadDrawer'
 import { ACTIVE_STAGES, OUTCOME_STAGES } from '../lib/constants'
-import NewLeadsTray from '../components/NewLeadsTray'
 import { supabase } from '../lib/supabase'
+import PipelineListView from '../components/Pipeline/PipelineListView'
+import PipelineCalendarView from '../components/Pipeline/PipelineCalendarView'
+import PipelineMapView from '../components/Pipeline/PipelineMapView'
 import { calculateDeal } from '../lib/scoring'
 import { useTeam } from '../lib/TeamContext'
 import { useAuth } from '../lib/AuthContext'
@@ -20,7 +22,7 @@ const OUTCOME_FILTERS = [
   { key: 'Backlog', label: 'Backlog', color: 'var(--ink-3)',soft: 'var(--hover)'     },
 ]
 
-function BoardHeader({ jobFilter, setJobFilter, outcomeFilter, setOutcomeFilter }) {
+function BoardHeader({ jobFilter, setJobFilter, outcomeFilter, setOutcomeFilter, view, setView }) {
   const { members } = useTeam()
   return (
     <div style={{
@@ -37,12 +39,12 @@ function BoardHeader({ jobFilter, setJobFilter, outcomeFilter, setOutcomeFilter 
         background: 'var(--panel)', border: '1px solid var(--line)',
         borderRadius: 10, padding: 2, boxShadow: 'var(--shadow-1)',
       }}>
-        {['Board', 'List', 'Calendar', 'Map'].map((v, i) => (
-          <button key={v} style={{
-            padding: '5px 12px', borderRadius: 8, border: 'none', cursor: i === 0 ? 'default' : 'pointer',
+        {['Board', 'List', 'Calendar', 'Map'].map(v => (
+          <button key={v} onClick={() => setView(v.toLowerCase())} style={{
+            padding: '5px 12px', borderRadius: 8, border: 'none', cursor: 'pointer',
             fontSize: 12, fontWeight: 600,
-            background: i === 0 ? 'var(--accent-soft)' : 'transparent',
-            color: i === 0 ? 'var(--accent-ink)' : 'var(--ink-3)',
+            background: view === v.toLowerCase() ? 'var(--accent-soft)' : 'transparent',
+            color: view === v.toLowerCase() ? 'var(--accent-ink)' : 'var(--ink-3)',
             fontFamily: 'inherit',
           }}>{v}</button>
         ))}
@@ -291,6 +293,7 @@ export default function Pipeline() {
   const [selectedLead, setSelectedLead] = useState(null)
   const [isNewLead, setIsNewLead] = useState(false)
 
+  const [view, setView] = useState('board')
   const [search, setSearch] = useState('')
   const [jobFilter, setJobFilter] = useState('All')
   const [outcomeFilter, setOutcomeFilter] = useState(null)
@@ -457,7 +460,7 @@ export default function Pipeline() {
   }, [leads])
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
 
       {/* Stats bar */}
       <div style={{
@@ -476,10 +479,20 @@ export default function Pipeline() {
       <BoardHeader
         jobFilter={jobFilter} setJobFilter={setJobFilter}
         outcomeFilter={outcomeFilter} setOutcomeFilter={setOutcomeFilter}
+        view={view} setView={setView}
       />
 
-      {/* Board + tray */}
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', overflow: 'hidden' }}>
+      {/* View area */}
+      {view === 'list' && (
+        <PipelineListView leads={filtered} onOpen={setDrawerLead} />
+      )}
+      {view === 'calendar' && (
+        <PipelineCalendarView leads={filtered} onOpen={setDrawerLead} />
+      )}
+      {view === 'map' && (
+        <PipelineMapView leads={filtered} onOpen={setDrawerLead} />
+      )}
+      {view === 'board' && (
       <div ref={boardRef} style={{ flex: 1, minHeight: 0, overflowX: 'scroll', overflowY: 'hidden', padding: '6px 20px 20px', scrollbarWidth: 'thin', scrollbarColor: '#6b7280 #11111b' }}>
         {loading ? (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text3)', fontSize: 13 }}>
@@ -519,8 +532,7 @@ export default function Pipeline() {
           </div>
         )}
       </div>
-      <NewLeadsTray />
-      </div>
+      )}
 
       {drawerLead && (
         <LeadDrawer

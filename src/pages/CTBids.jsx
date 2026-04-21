@@ -611,10 +611,9 @@ function InsightsTab({ D }) {
 function CategoriesTab({ D }) {
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState('rev')
-  const [minItems, setMinItems] = useState(1)
 
   const rows = useMemo(() => {
-    let list = D.categories.filter(c => c.sold >= minItems)
+    let list = D.categories.filter(c => c.sold >= 1)
     if (query) {
       const q = query.toLowerCase()
       list = list.filter(c => c.cat.toLowerCase().includes(q))
@@ -628,19 +627,17 @@ function CategoriesTab({ D }) {
       return 0
     })
     return list
-  }, [D.categories, query, sort, minItems])
+  }, [D.categories, query, sort])
 
   const maxRev = rows[0]?.rev || 1
 
   return (
     <div style={{ padding: '0 28px 36px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, padding: '6px 10px', minWidth: 240 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, padding: '6px 10px', flex: 1, minWidth: 200 }}>
           <Search size={13} strokeWidth={1.8} color="var(--ink-4)" />
           <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search categories…" style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontSize: 12.5, fontFamily: 'inherit', color: 'var(--ink-1)' }} />
         </div>
-        {[1, 3, 5, 10].map(n => <FilterChip key={n} label={`≥ ${n} sold`} active={minItems === n} onClick={() => setMinItems(n)} />)}
-        <div style={{ flex: 1 }} />
         <select value={sort} onChange={e => setSort(e.target.value)} style={{ padding: '6px 10px', borderRadius: 10, border: '1px solid var(--line)', background: 'var(--panel)', fontSize: 12, color: 'var(--ink-2)', fontFamily: 'inherit', fontWeight: 500 }}>
           <option value="rev">Sort: Total Revenue</option>
           <option value="avg">Sort: Highest avg price</option>

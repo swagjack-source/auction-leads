@@ -47,9 +47,9 @@ function PageHeader({ title, subtitle, actions }) {
 
 function MiniStat({ label, value, sub, tint, fg, icon: Ico }) {
   return (
-    <div style={{ background: `color-mix(in oklab, ${tint} 22%, var(--panel))`, border: '1px solid var(--line)', borderRadius: 12, padding: '12px 14px', boxShadow: 'var(--shadow-1)' }}>
+    <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 12, padding: '12px 14px', boxShadow: 'var(--shadow-1)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-        <div style={{ width: 24, height: 24, borderRadius: 7, background: tint, color: fg, display: 'grid', placeItems: 'center' }}>
+        <div style={{ width: 24, height: 24, borderRadius: 7, background: `color-mix(in oklab, ${tint} 25%, var(--panel))`, color: fg, border: `1px solid color-mix(in oklab, ${tint} 20%, var(--line))`, display: 'grid', placeItems: 'center' }}>
           <Ico size={13} strokeWidth={1.9} />
         </div>
         <span style={{ fontSize: 11.5, color: 'var(--ink-3)', fontWeight: 500 }}>{label}</span>

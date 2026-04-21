@@ -545,7 +545,7 @@ export default function CalendarView() {
   const todayStr = new Date().toISOString().slice(0, 10)
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
       {/* Header */}
       <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--line)', flexShrink: 0, background: 'var(--panel)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
