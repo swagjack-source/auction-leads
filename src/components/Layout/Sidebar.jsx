@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { NavLink } from 'react-router-dom'
-import { Home, Columns3, FolderOpen, CalendarDays, LayoutGrid, BookUser, Users, BookOpen, Image, Clock, X, Search, FileText, MoreHorizontal, LogOut } from 'lucide-react'
+import { Home, Columns3, FolderOpen, CalendarDays, LayoutGrid, BookUser, Users, BookOpen, Image, Clock, X, Search, FileText, LogOut, Gavel, Package, ReceiptText, Bookmark } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useTheme } from '../../lib/ThemeContext'
 import { useAuth } from '../../lib/AuthContext'
@@ -99,7 +99,11 @@ export default function Sidebar({ mobile, onClose }) {
   ]
 
   const quickLinks = [
-    { to: '/templates', icon: FileText, label: 'Templates' },
+    { to: '/templates', icon: FileText,    label: 'Templates' },
+    { to: '/expenses',  icon: ReceiptText, label: 'Expenses'  },
+    { to: '/inventory', icon: Package,     label: 'Inventory' },
+    { to: '/ctbids',    icon: Gavel,       label: 'CTBids'    },
+    { to: '/saved',     icon: Bookmark,    label: 'Saved Views'},
   ]
 
   return (
@@ -120,7 +124,7 @@ export default function Sidebar({ mobile, onClose }) {
       } : {}),
     }}>
 
-      {/* Workspace header — CT logo */}
+      {/* Workspace header — Homebase logo */}
       <div style={{
         padding: '4px 6px 12px',
         borderBottom: '1px solid var(--line-2)',

@@ -17,8 +17,9 @@
   --ink-4: #9AA0AB;
 
   /* Lines */
-  --line:   #E8E8E6;
-  --line-2: #EFEFEC;
+  --line:        #E8E8E6;
+  --line-2:      #EFEFEC;
+  --line-strong: #D0D0CC;
 
   /* Accent — slate-blue */
   --accent:       #3E5C86;
@@ -92,8 +93,9 @@
   --ink-2:   #D8DADF;
   --ink-3:   #9AA0AB;
   --ink-4:   #6E7480;
-  --line:    #2A2D34;
-  --line-2:  #24272D;
+  --line:        #2A2D34;
+  --line-2:      #24272D;
+  --line-strong: #3A3D45;
   --accent:       #7FA0C9;
   --accent-ink:   #B6CBE3;
   --accent-soft:  #23304A;

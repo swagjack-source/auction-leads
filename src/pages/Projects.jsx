@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
-import { Download, Upload, Plus, Search, ArrowUpDown, Grid3X3, List, MapPin, ExternalLink, X } from 'lucide-react'
+import { Download, Upload, Plus, Search, ArrowUpDown, Grid3X3, List, MapPin, ExternalLink, X, Star } from 'lucide-react'
+import PortfolioBuilderModal from '../components/modals/PortfolioBuilderModal'
 import { supabase } from '../lib/supabase'
 import { calculateDeal } from '../lib/scoring'
 import { useAuth } from '../lib/AuthContext'
@@ -199,6 +200,7 @@ export default function Projects() {
   const [statusFilter, setStatusFilter] = useState('All')
   const [typeFilter, setTypeFilter]   = useState('All')
   const [showScorer, setShowScorer]   = useState(false)
+  const [showPortfolio, setShowPortfolio] = useState(false)
   const [openLead, setOpenLead]       = useState(null)
   const fileRef                       = useRef()
 
@@ -299,6 +301,12 @@ export default function Projects() {
           >
             <Plus size={13} strokeWidth={2.5} /> New Project
           </button>
+          <button
+            onClick={() => setShowPortfolio(true)}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 13px 7px 10px', borderRadius: 10, border: '1px solid var(--line)', background: 'var(--panel)', color: 'var(--ink-1)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}
+          >
+            <Star size={13} strokeWidth={1.8} /> Portfolio deck
+          </button>
         </div>
       </div>
 
@@ -397,6 +405,8 @@ export default function Projects() {
       {showScorer && (
         <DealScorerModal onClose={() => setShowScorer(false)} onSaved={fetchLeads} />
       )}
+
+      <PortfolioBuilderModal open={showPortfolio} onClose={() => setShowPortfolio(false)} />
 
       {openLead && (
         <div

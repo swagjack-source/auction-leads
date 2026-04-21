@@ -42,7 +42,9 @@ const StageColumn = memo(function StageColumn({
       style={{
         display: 'flex',
         flexDirection: 'column',
-        background: isHover ? 'var(--hover)' : 'var(--bg-2)',
+        background: isHover
+          ? 'var(--accent-soft)'
+          : `color-mix(in oklab, ${meta.soft} 38%, var(--bg-2))`,
         border: isHover ? '1px dashed var(--accent)' : '1px solid var(--line)',
         borderRadius: 14,
         minHeight: 200,

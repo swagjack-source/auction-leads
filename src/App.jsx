@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { BrowserRouter, Routes, Route, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { Menu, Bell, Settings, Moon, Sun } from 'lucide-react'
+import { Menu, Bell, Moon, Sun, Sparkles } from 'lucide-react'
 import { useTheme } from './lib/ThemeContext'
 import ErrorBoundary from './components/ErrorBoundary'
 import PrivateRoute from './components/PrivateRoute'
@@ -18,6 +18,10 @@ import Training from './pages/Training'
 import Library from './pages/Library'
 import Inbox from './pages/Inbox'
 import Templates from './pages/Templates'
+import Expenses from './pages/Expenses'
+import Inventory from './pages/Inventory'
+import CTBids from './pages/CTBids'
+import SavedViews from './pages/SavedViews'
 import Login from './pages/Login'
 import { TeamProvider } from './lib/TeamContext'
 import { ThemeProvider } from './lib/ThemeContext'
@@ -39,6 +43,10 @@ const PAGE_TITLES = {
   '/library':    'Library',
   '/inbox':      'Inbox',
   '/templates':  'Templates',
+  '/expenses':   'Expenses',
+  '/inventory':  'Inventory',
+  '/ctbids':     'CTBids Analytics',
+  '/saved':      'Saved Views',
 }
 
 function Topbar({ onMenuClick, isMobile }) {
@@ -51,7 +59,7 @@ function Topbar({ onMenuClick, isMobile }) {
 
   return (
     <header style={{
-      height: 50,
+      height: 54,
       flexShrink: 0,
       display: 'flex',
       alignItems: 'center',
@@ -100,7 +108,7 @@ function Topbar({ onMenuClick, isMobile }) {
           background: '#C84A4A', border: '1.5px solid var(--bg)',
         }} />
       </button>
-      <button style={iconBtn} title="Settings"><Settings size={16} strokeWidth={1.7} /></button>
+      <button style={iconBtn} title="AI assistant"><Sparkles size={16} strokeWidth={1.7} /></button>
 
       <div style={{ width: 1, height: 22, background: 'var(--line)' }} />
 
@@ -209,6 +217,10 @@ export default function App() {
                     <Route path="/library"   element={<PrivateRoute><Library /></PrivateRoute>} />
                     <Route path="/inbox"     element={<PrivateRoute><Inbox /></PrivateRoute>} />
                     <Route path="/templates" element={<PrivateRoute><Templates /></PrivateRoute>} />
+                    <Route path="/expenses"  element={<PrivateRoute><Expenses /></PrivateRoute>} />
+                    <Route path="/inventory" element={<PrivateRoute><Inventory /></PrivateRoute>} />
+                    <Route path="/ctbids"    element={<PrivateRoute><CTBids /></PrivateRoute>} />
+                    <Route path="/saved"     element={<PrivateRoute><SavedViews /></PrivateRoute>} />
                   </Route>
                 </Routes>
               </ErrorBoundary>

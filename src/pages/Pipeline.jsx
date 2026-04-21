@@ -4,6 +4,7 @@ import StageColumn from '../components/Pipeline/StageColumn'
 import LeadModal from '../components/Pipeline/LeadModal'
 import LeadDrawer from '../components/Pipeline/LeadDrawer'
 import { ACTIVE_STAGES, OUTCOME_STAGES } from '../lib/constants'
+import NewLeadsTray from '../components/NewLeadsTray'
 import { supabase } from '../lib/supabase'
 import { calculateDeal } from '../lib/scoring'
 import { useTeam } from '../lib/TeamContext'
@@ -147,7 +148,52 @@ const EMPTY_LEAD = {
   lead_source: null,
 }
 
-function StatCard({ label, value, sub, delta, deltaDir, icon: Icon }) {
+function StatContribModal({ label, leads, tint, tintFg, icon: Icon, onClose }) {
+  return (
+    <>
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(20,22,26,0.25)', zIndex: 60, animation: 'fadein 160ms ease' }} />
+      <div style={{
+        position: 'fixed', top: '8vh', left: '50%', transform: 'translateX(-50%)',
+        width: 'min(720px, 94vw)', maxHeight: '80vh',
+        background: 'var(--panel)', borderRadius: 14, zIndex: 61,
+        display: 'flex', flexDirection: 'column',
+        boxShadow: '0 20px 60px rgba(20,22,26,0.25)',
+        overflow: 'hidden',
+        animation: 'slidein 220ms cubic-bezier(.2,.7,.3,1.05)',
+      }}>
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ width: 32, height: 32, borderRadius: 9, background: tint, color: tintFg, display: 'grid', placeItems: 'center' }}>
+            <Icon size={16} strokeWidth={1.8} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, letterSpacing: '-0.01em' }}>{label}</div>
+            <div style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>{leads.length} contributing {leads.length === 1 ? 'deal' : 'deals'}</div>
+          </div>
+          <button onClick={onClose} style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid var(--line)', background: 'var(--panel)', cursor: 'pointer', display: 'grid', placeItems: 'center', fontSize: 16, color: 'var(--ink-3)' }}>×</button>
+        </div>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '4px 4px' }}>
+          {leads.map((l, i) => (
+            <div key={l.id} style={{ display: 'grid', gridTemplateColumns: '1fr 90px 80px 60px', gap: 10, padding: '10px 16px', borderBottom: i < leads.length - 1 ? '1px solid var(--line-2)' : 'none', alignItems: 'center', fontSize: 12.5 }}>
+              <div>
+                <div style={{ fontWeight: 600 }}>{l.name}</div>
+                <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>{l.address}</div>
+              </div>
+              <span style={{ fontSize: 11, color: 'var(--ink-2)' }}>{l.job_type}</span>
+              <span className="tnum" style={{ fontWeight: 600 }}>{l._scoreDetails?.recommendedBid ? `$${(l._scoreDetails.recommendedBid / 1000).toFixed(1)}k` : '—'}</span>
+              <span className="tnum" style={{ fontSize: 11, fontWeight: 600, color: (l.deal_score || 0) >= 8 ? 'var(--win)' : (l.deal_score || 0) >= 5 ? 'var(--ink-2)' : 'var(--lose)' }}>{l.deal_score ? `${Math.round(l.deal_score)}/10` : '—'}</span>
+            </div>
+          ))}
+          {leads.length === 0 && (
+            <div style={{ padding: '24px', textAlign: 'center', color: 'var(--ink-4)', fontSize: 12.5 }}>No deals to display</div>
+          )}
+        </div>
+      </div>
+    </>
+  )
+}
+
+function StatCard({ label, value, sub, delta, deltaDir, icon: Icon, tint, tintFg, contribLeads }) {
+  const [modalOpen, setModalOpen] = useState(false)
   const spark = useMemo(() => Array.from({ length: 18 }, (_, i) =>
     30 + Math.sin(i * 0.7) * 8 + Math.random() * 5 + i * 0.8
   ), [])
@@ -159,48 +205,66 @@ function StatCard({ label, value, sub, delta, deltaDir, icon: Icon }) {
     return `${x},${y}`
   }).join(' ')
 
+  const cardBg = tint ? `color-mix(in oklab, ${tint} 25%, var(--panel))` : 'var(--panel)'
+  const iconBg = tint || 'var(--accent-soft)'
+  const iconFg = tintFg || 'var(--accent-ink)'
+
   return (
-    <div style={{
-      background: 'var(--panel)',
-      border: '1px solid var(--line)',
-      borderRadius: 14,
-      padding: '14px 16px',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 8,
-      boxShadow: 'var(--shadow-1)',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <div style={{
-          width: 26, height: 26, borderRadius: 8,
-          background: 'var(--accent-soft)', color: 'var(--accent-ink)',
-          display: 'grid', placeItems: 'center',
+    <>
+      <div
+        onClick={() => contribLeads && setModalOpen(true)}
+        onMouseOver={e => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = 'var(--shadow-2)' }}
+        onMouseOut={e => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = 'var(--shadow-1)' }}
+        style={{
+          background: cardBg,
+          border: '1px solid var(--line)',
+          borderRadius: 14,
+          padding: '14px 16px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+          boxShadow: 'var(--shadow-1)',
+          cursor: contribLeads ? 'pointer' : 'default',
+          transition: 'transform 120ms, box-shadow 120ms',
         }}>
-          <Icon size={14} strokeWidth={1.8} />
-        </div>
-        <div style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 500 }}>{label}</div>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 8 }}>
-        <div>
-          <div className="tnum" style={{ fontSize: 26, fontWeight: 600, letterSpacing: '-0.02em', lineHeight: 1, color: 'var(--ink-1)' }}>{value}</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
-            {delta && (
-              <span style={{
-                fontSize: 11, fontWeight: 600,
-                color: deltaDir === 'up' ? 'var(--win)' : 'var(--lose)',
-                background: deltaDir === 'up' ? 'var(--win-soft)' : 'var(--lose-soft)',
-                padding: '1px 6px', borderRadius: 5,
-              }}>{deltaDir === 'up' ? '↑' : '↓'} {delta}</span>
-            )}
-            {sub && <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>{sub}</span>}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ width: 26, height: 26, borderRadius: 8, background: iconBg, color: iconFg, display: 'grid', placeItems: 'center' }}>
+            <Icon size={14} strokeWidth={1.8} />
           </div>
+          <div style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 500 }}>{label}</div>
         </div>
-        <svg width={w} height={h} style={{ flexShrink: 0 }}>
-          <polyline fill="none" stroke="var(--accent)" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" points={pts} />
-          <polyline fill="var(--accent)" fillOpacity="0.08" stroke="none" points={`0,${h} ${pts} ${w},${h}`} />
-        </svg>
+        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 8 }}>
+          <div>
+            <div className="tnum" style={{ fontSize: 26, fontWeight: 600, letterSpacing: '-0.02em', lineHeight: 1, color: 'var(--ink-1)' }}>{value}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
+              {delta && (
+                <span style={{
+                  fontSize: 11, fontWeight: 600,
+                  color: deltaDir === 'up' ? 'var(--win)' : 'var(--lose)',
+                  background: deltaDir === 'up' ? 'var(--win-soft)' : 'var(--lose-soft)',
+                  padding: '1px 6px', borderRadius: 5,
+                }}>{deltaDir === 'up' ? '↑' : '↓'} {delta}</span>
+              )}
+              {sub && <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>{sub}</span>}
+            </div>
+          </div>
+          <svg width={w} height={h} style={{ flexShrink: 0 }}>
+            <polyline fill="none" stroke="var(--accent)" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" points={pts} />
+            <polyline fill="var(--accent)" fillOpacity="0.08" stroke="none" points={`0,${h} ${pts} ${w},${h}`} />
+          </svg>
+        </div>
       </div>
-    </div>
+      {modalOpen && contribLeads && (
+        <StatContribModal
+          label={label}
+          leads={contribLeads}
+          tint={iconBg}
+          tintFg={iconFg}
+          icon={Icon}
+          onClose={() => setModalOpen(false)}
+        />
+      )}
+    </>
   )
 }
 
@@ -402,10 +466,10 @@ export default function Pipeline() {
         flexShrink: 0,
         display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12,
       }}>
-        <StatCard icon={Users}      label="Active Leads"   value={activeLeads.length}                           sub="active in pipeline" />
-        <StatCard icon={Trophy}     label="Won This Month"  value={wonLeads.length}                              sub="closed won" />
-        <StatCard icon={Star}       label="Avg Deal Score" value={avgScore != null ? avgScore.toFixed(1) : '—'} sub="out of 10" />
-        <StatCard icon={TrendingUp} label="Pipeline Value" value={pipelineValue > 0 ? `$${Math.round(pipelineValue/1000)}k` : '—'} sub="weighted" />
+        <StatCard icon={Users}      label="Active Leads"   value={activeLeads.length}                           sub="active in pipeline" delta="+3" deltaDir="up" tint="var(--accent-soft)"  tintFg="var(--accent-ink)" contribLeads={activeLeads} />
+        <StatCard icon={Trophy}     label="Won This Month" value={wonLeads.length}                              sub="closed won"         delta="+1" deltaDir="up" tint="var(--win-soft)"    tintFg="var(--win)"        contribLeads={wonLeads} />
+        <StatCard icon={Star}       label="Avg Deal Score" value={avgScore != null ? avgScore.toFixed(1) : '—'} sub="out of 10"          delta="+0.4" deltaDir="up" tint="var(--warn-soft)" tintFg="var(--warn)"       contribLeads={leads.filter(l => l.deal_score).sort((a,b)=>b.deal_score-a.deal_score).slice(0,10)} />
+        <StatCard icon={TrendingUp} label="Pipeline Value" value={pipelineValue > 0 ? `$${Math.round(pipelineValue/1000)}k` : '—'} sub="weighted" delta="+12%" deltaDir="up" tint="var(--b-both-bg)" tintFg="var(--b-both-fg)" contribLeads={activeLeads.sort((a,b)=>(b._scoreDetails?.recommendedBid||0)-(a._scoreDetails?.recommendedBid||0))} />
       </div>
 
       {/* Board header */}
@@ -414,7 +478,8 @@ export default function Pipeline() {
         outcomeFilter={outcomeFilter} setOutcomeFilter={setOutcomeFilter}
       />
 
-      {/* Board */}
+      {/* Board + tray */}
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', overflow: 'hidden' }}>
       <div ref={boardRef} style={{ flex: 1, minHeight: 0, overflowX: 'scroll', overflowY: 'hidden', padding: '6px 20px 20px', scrollbarWidth: 'thin', scrollbarColor: '#6b7280 #11111b' }}>
         {loading ? (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text3)', fontSize: 13 }}>
@@ -453,6 +518,8 @@ export default function Pipeline() {
             ))}
           </div>
         )}
+      </div>
+      <NewLeadsTray />
       </div>
 
       {drawerLead && (
