@@ -1,14 +1,8 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { X, Plus, Sparkles } from 'lucide-react'
 import { calculateDeal, getScoreColor, getScoreLabel, getSizeBucket } from '../../lib/scoring'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../lib/AuthContext'
-
-const DENSITY_OPTIONS = [
-  { id: 'Low',    title: 'Low',    sub: 'Mostly empty rooms' },
-  { id: 'Medium', title: 'Medium', sub: 'Average household clutter' },
-  { id: 'High',   title: 'High',   sub: 'Heavy / hoarder conditions' },
-]
 
 const JOB_TYPE_OPTIONS = [
   { id: 'Clean Out', title: 'Clean Out Only',      sub: 'Labor-focused, no auction' },
@@ -19,32 +13,60 @@ const JOB_TYPE_OPTIONS = [
 const DENSITY_MULT = { Low: 0.7, Medium: 1.0, High: 1.45 }
 const JOB_MULT     = { 'Clean Out': 0.85, Auction: 1.1, Both: 1.3 }
 
-// ── Shared design components ───────────────────────────────────
+// ── Density segmented control ──────────────────────────────────
+
+function DensityToggle({ value, onChange }) {
+  const opts = [
+    { id: 'Low',    label: 'Low',    sub: 'Mostly empty' },
+    { id: 'Medium', label: 'Medium', sub: 'Avg. clutter' },
+    { id: 'High',   label: 'High',   sub: 'Heavy / hoarder' },
+  ]
+  return (
+    <div style={{ display: 'flex', border: '1px solid var(--line)', borderRadius: 10, overflow: 'hidden', background: 'var(--bg)' }}>
+      {opts.map((o, i) => {
+        const sel = o.id === value
+        return (
+          <button key={o.id} onClick={() => onChange(o.id)} style={{
+            flex: 1, padding: '8px 4px', border: 'none',
+            borderRight: i < opts.length - 1 ? '1px solid var(--line)' : 'none',
+            background: sel ? 'var(--accent-soft)' : 'transparent',
+            cursor: 'pointer', fontFamily: 'inherit', textAlign: 'center',
+          }}>
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: sel ? 'var(--accent)' : 'var(--ink-2)' }}>{o.label}</div>
+            <div style={{ fontSize: 10, color: sel ? 'color-mix(in oklab, var(--accent) 80%, var(--ink-3))' : 'var(--ink-4)', marginTop: 1 }}>{o.sub}</div>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+// ── Job type radio stack ───────────────────────────────────────
 
 function RadioStack({ options, value, onChange }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
       {options.map(o => {
         const sel = o.id === value
         return (
           <button key={o.id} onClick={() => onChange(o.id)} style={{
             display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left',
-            padding: '10px 12px', borderRadius: 10,
+            padding: '9px 12px', borderRadius: 10,
             border: sel ? '1.5px solid var(--accent)' : '1px solid var(--line)',
             background: sel ? 'var(--accent-soft)' : 'var(--bg)',
             cursor: 'pointer', fontFamily: 'inherit',
           }}>
             <span style={{
-              width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
+              width: 15, height: 15, borderRadius: '50%', flexShrink: 0,
               border: '1.5px solid ' + (sel ? 'var(--accent)' : 'var(--ink-4)'),
               background: sel ? 'var(--accent)' : 'var(--bg)',
               display: 'grid', placeItems: 'center',
             }}>
-              {sel && <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--panel)' }} />}
+              {sel && <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--panel)' }} />}
             </span>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink-1)' }}>{o.title}</div>
-              <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginTop: 1 }}>{o.sub}</div>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink-1)' }}>{o.title}</div>
+              <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 1 }}>{o.sub}</div>
             </div>
           </button>
         )
@@ -52,6 +74,8 @@ function RadioStack({ options, value, onChange }) {
     </div>
   )
 }
+
+// ── Quality slider ─────────────────────────────────────────────
 
 function QualitySlider({ value, onChange }) {
   const tier = value >= 9 ? { label: 'Exceptional', color: 'var(--win)',    bg: 'var(--win-soft)',    hint: 'High-end antiques, designer pieces, collectibles' }
@@ -61,37 +85,24 @@ function QualitySlider({ value, onChange }) {
   const pct = ((value - 1) / 9) * 100
 
   return (
-    <div style={{ marginBottom: 16 }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8 }}>
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 7 }}>
         <span style={{ fontSize: 12.5, color: 'var(--ink-2)', fontWeight: 500 }}>Item Quality</span>
-        <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
-          <span style={{ fontSize: 18, fontWeight: 600, color: tier.color, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>{value}</span>
-          <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>/ 10</span>
+        <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 5 }}>
+          <span style={{ fontSize: 17, fontWeight: 600, color: tier.color, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>{value}</span>
+          <span style={{ fontSize: 10.5, color: 'var(--ink-4)' }}>/ 10</span>
         </span>
       </div>
 
-      <div style={{ position: 'relative', height: 28 }}>
-        <div style={{
-          position: 'absolute', top: 11, left: 0, right: 0, height: 6, borderRadius: 999,
-          background: 'linear-gradient(90deg, color-mix(in oklab, var(--lose) 18%, var(--line-2)) 0%, color-mix(in oklab, var(--warn) 18%, var(--line-2)) 45%, color-mix(in oklab, var(--accent) 18%, var(--line-2)) 70%, color-mix(in oklab, var(--win) 22%, var(--line-2)) 100%)',
-        }} />
-        <div style={{
-          position: 'absolute', top: 11, left: 0, width: `${pct}%`, height: 6, borderRadius: 999,
-          background: `linear-gradient(90deg, color-mix(in oklab, var(--lose) 70%, ${tier.color}) 0%, ${tier.color} 100%)`,
-          transition: 'width 160ms ease',
-        }} />
-        <div style={{ position: 'absolute', top: 11, left: 0, right: 0, height: 6, display: 'flex', justifyContent: 'space-between', pointerEvents: 'none' }}>
+      <div style={{ position: 'relative', height: 26 }}>
+        <div style={{ position: 'absolute', top: 10, left: 0, right: 0, height: 6, borderRadius: 999, background: 'linear-gradient(90deg, color-mix(in oklab, var(--lose) 18%, var(--line-2)) 0%, color-mix(in oklab, var(--warn) 18%, var(--line-2)) 45%, color-mix(in oklab, var(--accent) 18%, var(--line-2)) 70%, color-mix(in oklab, var(--win) 22%, var(--line-2)) 100%)' }} />
+        <div style={{ position: 'absolute', top: 10, left: 0, width: `${pct}%`, height: 6, borderRadius: 999, background: `linear-gradient(90deg, color-mix(in oklab, var(--lose) 70%, ${tier.color}) 0%, ${tier.color} 100%)`, transition: 'width 160ms ease' }} />
+        <div style={{ position: 'absolute', top: 10, left: 0, right: 0, height: 6, display: 'flex', justifyContent: 'space-between', pointerEvents: 'none' }}>
           {Array.from({ length: 10 }).map((_, i) => (
             <div key={i} style={{ width: 2, height: 6, background: i + 1 <= value ? 'rgba(255,255,255,0.5)' : 'var(--ink-4)', opacity: i === 0 || i === 9 ? 0 : 0.35 }} />
           ))}
         </div>
-        <div style={{
-          position: 'absolute', top: 4, left: `calc(${pct}% - 10px)`,
-          width: 20, height: 20, borderRadius: '50%',
-          background: 'var(--panel)', border: `2.5px solid ${tier.color}`,
-          boxShadow: '0 2px 6px rgba(20,22,26,0.15)',
-          pointerEvents: 'none', transition: 'left 160ms ease',
-        }} />
+        <div style={{ position: 'absolute', top: 3, left: `calc(${pct}% - 10px)`, width: 20, height: 20, borderRadius: '50%', background: 'var(--panel)', border: `2.5px solid ${tier.color}`, boxShadow: '0 2px 6px rgba(20,22,26,0.15)', pointerEvents: 'none', transition: 'left 160ms ease' }} />
         <input type="range" min="1" max="10" step="1" value={value}
           onChange={e => onChange(+e.target.value)}
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer', margin: 0 }} />
@@ -103,13 +114,90 @@ function QualitySlider({ value, onChange }) {
         ))}
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, padding: '10px 12px', borderRadius: 10, background: tier.bg, border: `1px solid color-mix(in oklab, ${tier.color} 18%, var(--line))` }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8, padding: '8px 12px', borderRadius: 10, background: tier.bg, border: `1px solid color-mix(in oklab, ${tier.color} 18%, var(--line))` }}>
         <span style={{ fontSize: 10.5, fontWeight: 600, color: tier.color, background: 'var(--panel)', padding: '2px 8px', borderRadius: 4, textTransform: 'uppercase', letterSpacing: '0.06em', boxShadow: '0 1px 0 rgba(20,22,26,0.04)', flexShrink: 0 }}>{tier.label}</span>
-        <span style={{ fontSize: 11.5, color: 'var(--ink-2)', lineHeight: 1.35 }}>{tier.hint}</span>
+        <span style={{ fontSize: 11, color: 'var(--ink-2)', lineHeight: 1.35 }}>{tier.hint}</span>
       </div>
     </div>
   )
 }
+
+// ── Similar job picker ─────────────────────────────────────────
+
+function SimilarJobPicker({ organizationId, onSelect }) {
+  const [jobs, setJobs]         = useState([])
+  const [query, setQuery]       = useState('')
+  const [open, setOpen]         = useState(false)
+  const [selected, setSelected] = useState(null)
+  const ref = useRef(null)
+
+  useEffect(() => {
+    if (!organizationId) return
+    supabase.from('deal_scores')
+      .select('id, job_name, square_footage, density, job_type, item_quality, zip_code, recommended_bid, deal_score, bid_tag')
+      .eq('organization_id', organizationId)
+      .not('job_name', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(200)
+      .then(({ data }) => setJobs(data || []))
+  }, [organizationId])
+
+  useEffect(() => {
+    function handleClick(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [])
+
+  const filtered = jobs.filter(j => !query || j.job_name?.toLowerCase().includes(query.toLowerCase()))
+
+  const bidTagColor = { underbid: 'var(--lose)', good_bid: 'var(--win)', overbid: 'var(--warn)' }
+  const bidTagLabel = { underbid: 'Underbid', good_bid: 'Good Bid', overbid: 'Overbid' }
+
+  function pick(job) {
+    setSelected(job)
+    setQuery(job.job_name || '')
+    setOpen(false)
+    onSelect(job)
+  }
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <input
+        value={query}
+        onChange={e => { setQuery(e.target.value); setOpen(true); if (!e.target.value) setSelected(null) }}
+        onFocus={() => setOpen(true)}
+        placeholder={jobs.length ? `Search ${jobs.length} past jobs…` : 'No saved jobs yet'}
+        disabled={!jobs.length}
+        style={{ width: '100%', padding: '9px 12px', fontSize: 13, border: '1px solid var(--line)', borderRadius: 10, background: 'var(--bg)', color: 'var(--ink-1)', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box', opacity: jobs.length ? 1 : 0.5 }}
+      />
+      {open && filtered.length > 0 && (
+        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 400, marginTop: 4, maxHeight: 200, overflowY: 'auto', background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, boxShadow: 'var(--shadow-1)' }}>
+          {filtered.map((job, i) => (
+            <button key={job.id} onClick={() => pick(job)} style={{ width: '100%', textAlign: 'left', padding: '9px 12px', border: 'none', borderBottom: i < filtered.length - 1 ? '1px solid var(--line-2)' : 'none', background: 'none', cursor: 'pointer', fontFamily: 'inherit', display: 'block' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink-1)', flex: 1 }}>{job.job_name}</span>
+                {job.bid_tag && <span style={{ fontSize: 10, fontWeight: 700, color: bidTagColor[job.bid_tag] || 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{bidTagLabel[job.bid_tag] || job.bid_tag}</span>}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>
+                {job.square_footage?.toLocaleString()} sqft · {job.density} · {job.job_type}{job.recommended_bid ? ` · $${job.recommended_bid.toLocaleString()}` : ''}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+      {selected && (
+        <div style={{ marginTop: 7, padding: '8px 12px', background: 'var(--accent-soft)', borderRadius: 8, border: '1px solid color-mix(in oklab, var(--accent) 20%, var(--line))' }}>
+          <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>
+            Fields loaded from <strong style={{ color: 'var(--accent)' }}>{selected.job_name}</strong>
+            {selected.recommended_bid && <span style={{ color: 'var(--ink-2)' }}> — original bid ${selected.recommended_bid.toLocaleString()}</span>}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Score ring ─────────────────────────────────────────────────
 
 function ScoreRing({ score, color }) {
   const r = 34, c = 2 * Math.PI * r
@@ -127,6 +215,8 @@ function ScoreRing({ score, color }) {
   )
 }
 
+// ── Result card ────────────────────────────────────────────────
+
 function ResultCard({ label, value, sub, tone }) {
   const toneColor = tone === 'win' ? 'var(--win)' : 'var(--ink-1)'
   return (
@@ -134,6 +224,41 @@ function ResultCard({ label, value, sub, tone }) {
       <div style={{ fontSize: 10.5, color: 'var(--ink-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</div>
       <div style={{ fontSize: 22, fontWeight: 600, letterSpacing: '-0.02em', marginTop: 4, color: toneColor, fontVariantNumeric: 'tabular-nums' }}>{value}</div>
       {sub && <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 3 }}>{sub}</div>}
+    </div>
+  )
+}
+
+// ── Skeleton results ───────────────────────────────────────────
+
+function SkeletonResults() {
+  const skel = (h, w = '100%', r = 6) => ({ height: h, width: w, borderRadius: r, background: 'var(--line-2)', display: 'block', flexShrink: 0 })
+  return (
+    <div style={{ opacity: 0.65 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <div style={{ width: 80, height: 80, borderRadius: '50%', background: 'var(--line-2)', flexShrink: 0 }} />
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={skel(10, '35%', 4)} />
+          <div style={skel(8, '100%', 999)} />
+          <div style={skel(22, '28%', 999)} />
+        </div>
+      </div>
+      <div style={{ marginTop: 18, padding: '22px 24px', borderRadius: 16, border: '1px solid var(--line)', background: 'var(--line-2)' }}>
+        <div style={skel(10, '28%', 4)} />
+        <div style={{ ...skel(42, '55%', 6), marginTop: 8 }} />
+        <div style={{ ...skel(11, '38%', 4), marginTop: 8 }} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12 }}>
+        {[0, 1, 2, 3].map(i => (
+          <div key={i} style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 12, padding: '12px 14px' }}>
+            <div style={skel(10, '45%', 4)} />
+            <div style={{ ...skel(22, '65%', 4), marginTop: 6 }} />
+          </div>
+        ))}
+      </div>
+      <div style={{ marginTop: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, color: 'var(--ink-4)', fontSize: 12.5 }}>
+        <Sparkles size={14} strokeWidth={1.6} />
+        Fill in the form and click Calculate to see results
+      </div>
     </div>
   )
 }
@@ -150,10 +275,28 @@ export default function DealScorerModal({ onClose, onSaved }) {
   const [result, setResult]           = useState(null)
   const [saving, setSaving]           = useState(false)
   const [added, setAdded]             = useState(false)
+  const hasCalculated = useRef(false)
+
+  // Live recalc after first Calculate click
+  useEffect(() => {
+    if (!hasCalculated.current) return
+    if (!sqft || isNaN(Number(sqft)) || Number(sqft) <= 0) { setResult(null); return }
+    setResult(calculateDeal({ sqft: Number(sqft), density, itemQuality: Number(itemQuality), jobType, zipCode }))
+  }, [sqft, density, itemQuality, jobType, zipCode])
 
   function calculate() {
     if (!sqft) return
+    hasCalculated.current = true
     setResult(calculateDeal({ sqft: Number(sqft), density, itemQuality: Number(itemQuality), jobType, zipCode }))
+  }
+
+  function handleJobSelect(job) {
+    setSqft(job.square_footage?.toString() || '')
+    setDensity(job.density || 'Medium')
+    setItemQuality(job.item_quality ?? 7)
+    setJobType(job.job_type || 'Both')
+    setZipCode(job.zip_code || '')
+    if (job.square_footage) hasCalculated.current = true
   }
 
   async function handleAddToPipeline() {
@@ -173,7 +316,7 @@ export default function DealScorerModal({ onClose, onSaved }) {
 
   const scoreColor = result ? getScoreColor(result.dealScore) : 'var(--ink-4)'
   const scoreLabel = result ? getScoreLabel(result.dealScore) : ''
-  const scoreBg = result
+  const scoreBg    = result
     ? result.dealScore >= 8 ? 'var(--win-soft)' : result.dealScore >= 6.5 ? 'var(--accent-soft)' : result.dealScore >= 5 ? 'var(--warn-soft)' : 'var(--lose-soft)'
     : 'var(--line-2)'
 
@@ -206,59 +349,61 @@ export default function DealScorerModal({ onClose, onSaved }) {
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex', minHeight: 0 }}>
 
           {/* Left: Form */}
-          <div style={{ width: 360, flexShrink: 0, overflowY: 'auto', padding: '20px 24px', borderRight: '1px solid var(--line)', background: 'var(--panel)' }}>
-            <h2 style={{ margin: '0 0 4px', fontSize: 20, fontWeight: 600, letterSpacing: '-0.02em', color: 'var(--ink-1)' }}>Deal Scorer</h2>
-            <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--ink-3)', lineHeight: 1.45 }}>Estimate labor, costs, and deal quality before your consult.</p>
+          <div style={{ width: 360, flexShrink: 0, overflowY: 'auto', padding: '16px 20px 20px', borderRight: '1px solid var(--line)', background: 'var(--panel)' }}>
 
-            <div style={{ fontSize: 10.5, color: 'var(--ink-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>Property</div>
+            <div style={{ fontSize: 10.5, color: 'var(--ink-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>Load from past job</div>
+            <SimilarJobPicker organizationId={organizationId} onSelect={handleJobSelect} />
 
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 12.5, color: 'var(--ink-2)', fontWeight: 500, marginBottom: 6 }}>Square Footage</div>
+            <div style={{ fontSize: 10.5, color: 'var(--ink-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', margin: '14px 0 8px' }}>Property</div>
+
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 12.5, color: 'var(--ink-2)', fontWeight: 500, marginBottom: 5 }}>Square Footage</div>
               <input type="number" value={sqft} onChange={e => setSqft(e.target.value)} placeholder="e.g. 2400"
-                style={{ width: '100%', padding: '10px 12px', fontSize: 13, border: '1px solid var(--line)', borderRadius: 10, background: 'var(--bg)', outline: 'none', color: 'var(--ink-1)', fontFamily: 'inherit', boxSizing: 'border-box' }} />
+                style={{ width: '100%', padding: '9px 12px', fontSize: 13, border: '1px solid var(--line)', borderRadius: 10, background: 'var(--bg)', outline: 'none', color: 'var(--ink-1)', fontFamily: 'inherit', boxSizing: 'border-box' }} />
               {sqft && !isNaN(Number(sqft)) && Number(sqft) > 0 && (
-                <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 4 }}>Size bucket: <strong style={{ color: 'var(--ink-1)' }}>{getSizeBucket(Number(sqft))}</strong></div>
+                <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 3 }}>Size bucket: <strong style={{ color: 'var(--ink-1)' }}>{getSizeBucket(Number(sqft))}</strong></div>
               )}
             </div>
 
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 12.5, color: 'var(--ink-2)', fontWeight: 500, marginBottom: 6 }}>Property Density</div>
-              <RadioStack options={DENSITY_OPTIONS} value={density} onChange={setDensity} />
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 12.5, color: 'var(--ink-2)', fontWeight: 500, marginBottom: 5 }}>Property Density</div>
+              <DensityToggle value={density} onChange={setDensity} />
             </div>
 
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 12.5, color: 'var(--ink-2)', fontWeight: 500, marginBottom: 6 }}>ZIP Code</div>
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 12.5, color: 'var(--ink-2)', fontWeight: 500, marginBottom: 5 }}>ZIP Code</div>
               <input value={zipCode} onChange={e => setZipCode(e.target.value)} placeholder="e.g. 80015"
-                style={{ width: '100%', padding: '10px 12px', fontSize: 13, border: '1px solid var(--line)', borderRadius: 10, background: 'var(--bg)', outline: 'none', color: 'var(--ink-1)', fontFamily: 'inherit', boxSizing: 'border-box' }} />
+                style={{ width: '100%', padding: '9px 12px', fontSize: 13, border: '1px solid var(--line)', borderRadius: 10, background: 'var(--bg)', outline: 'none', color: 'var(--ink-1)', fontFamily: 'inherit', boxSizing: 'border-box' }} />
             </div>
 
-            <div style={{ fontSize: 10.5, color: 'var(--ink-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', margin: '20px 0 10px' }}>Deal factors</div>
+            <div style={{ fontSize: 10.5, color: 'var(--ink-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', margin: '14px 0 8px' }}>Deal Factors</div>
 
             <QualitySlider value={itemQuality} onChange={setItemQuality} />
 
-            <div style={{ marginBottom: 20 }}>
-              <div style={{ fontSize: 12.5, color: 'var(--ink-2)', fontWeight: 500, marginBottom: 6 }}>Job Type</div>
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 12.5, color: 'var(--ink-2)', fontWeight: 500, marginBottom: 5 }}>Job Type</div>
               <RadioStack options={JOB_TYPE_OPTIONS} value={jobType} onChange={setJobType} />
             </div>
 
             <button onClick={calculate} disabled={!sqft} style={{
-              width: '100%', padding: '12px', borderRadius: 12, border: 'none',
+              width: '100%', padding: '11px', borderRadius: 12, border: 'none',
               background: sqft ? 'var(--accent)' : 'var(--line)',
               color: sqft ? 'white' : 'var(--ink-4)',
               fontWeight: 600, fontSize: 13.5, cursor: sqft ? 'pointer' : 'not-allowed',
               boxShadow: sqft ? '0 1px 0 rgba(255,255,255,0.15) inset, 0 2px 6px rgba(43,68,104,0.2)' : 'none',
-            }}>Calculate Deal Score</button>
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            }}>
+              Calculate Deal Score
+              {hasCalculated.current && result && (
+                <span style={{ fontSize: 10.5, fontWeight: 500, opacity: 0.8 }}>· auto-updating</span>
+              )}
+            </button>
           </div>
 
           {/* Right: Results */}
           <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '22px 28px 28px' }}>
             {!result ? (
-              <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-4)', fontSize: 13 }}>
-                <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'var(--accent-soft)', color: 'var(--accent)', display: 'grid', placeItems: 'center', marginBottom: 12 }}>
-                  <Sparkles size={28} strokeWidth={1.6} />
-                </div>
-                Fill in the form and click Calculate
-              </div>
+              <SkeletonResults />
             ) : (
               <>
                 {/* Score header */}
@@ -316,7 +461,7 @@ export default function DealScorerModal({ onClose, onSaved }) {
                 </div>
 
                 {/* Breakdown */}
-                <div style={{ fontSize: 10.5, color: 'var(--ink-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', margin: '20px 0 10px' }}>Calculation breakdown</div>
+                <div style={{ fontSize: 10.5, color: 'var(--ink-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', margin: '18px 0 8px' }}>Calculation breakdown</div>
                 <div style={{ border: '1px solid var(--line)', borderRadius: 12, overflow: 'hidden', background: 'var(--panel)' }}>
                   {[
                     ['Property size',       `${Number(sqft).toLocaleString()} sq ft`],
