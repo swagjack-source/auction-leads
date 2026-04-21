@@ -10,16 +10,17 @@ export function getSizeBucket(sqft) {
   return 'Large'
 }
 
-// Labour hour estimates for Clean Out base, by size × density
-// Source: CT Denver SE payroll records, 42 projects, 2025–2026
-//   Small  ($1.5k–$4k jobs):  8–45 hrs observed  → med ~25 hrs
-//   Medium ($4k–$8.5k jobs):  30–65 hrs observed → med ~50 hrs
-//   Large  ($8.5k–$15k jobs): 62–162 hrs observed → med ~100 hrs
-// Density multipliers estimated (0.55× Low, 1.0× Med, 1.65× High)
+// Labour hour estimates for Clean Out, by size × density
+// Source: CT Denver SE payroll + Zillow sqft for 11 confirmed properties (2025–2026)
+// Observed clean-out hrs/sqft: 0.019–0.049, avg 0.027 (excl. auction-primary outliers)
+//   Confirmed sqft thresholds: Small <1,500 / Medium 1,500–3,500 / Large 3,500+
+//   Sample: Carol Throm 1,591 sqft→50 hrs, Karin McGaughey 2,587→50 hrs,
+//           John Rinas 2,740→66 hrs, Jennifer Knotts 4,133→90 hrs
+// Density multipliers: Low 0.55×, Medium 1.0×, High 1.65×
 const LABOUR_HOURS = {
-  Small:  { Low: 14, Medium: 25, High: 40  },
-  Medium: { Low: 28, Medium: 50, High: 82  },
-  Large:  { Low: 55, Medium: 100, High: 165 },
+  Small:  { Low: 16, Medium: 30, High: 50  },
+  Medium: { Low: 36, Medium: 65, High: 107 },
+  Large:  { Low: 67, Medium: 122, High: 201 },
 }
 
 export function estimateLabourHours(sqft, density) {
