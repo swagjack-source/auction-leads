@@ -456,7 +456,7 @@ function CompletedProjectsTab({ rows }) {
           {filtered.map((lead, i) => {
             const bid = lead._scoreDetails?.recommendedBid || 0
             const labor = lead._scoreDetails?.labourCost || 0
-            const royalties = Math.round(bid * 0.07)
+            const royalties = Math.round(bid * 0.08)
             const profit = lead._scoreDetails?.estimatedProfit ?? null
             const marginPct = lead._scoreDetails?.profitMarginPct != null ? Math.round(lead._scoreDetails.profitMarginPct) : null
             const marginColor = marginPct == null ? 'var(--ink-4)'
