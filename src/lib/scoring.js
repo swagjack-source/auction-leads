@@ -11,10 +11,12 @@ export function getSizeBucket(sqft) {
 }
 
 // Labour hour estimates by size × density
+// Calibrated from real project data (Denver/Aurora area, 2025–2026)
+// One confirmed data point: medium home ~68 hrs at $22/hr = $1,504 labour
 const LABOUR_HOURS = {
-  Small:  { Low: 40,  Medium: 60,  High: 90  },
-  Medium: { Low: 80,  Medium: 120, High: 160 },
-  Large:  { Low: 120, Medium: 160, High: 200 },
+  Small:  { Low: 20,  Medium: 40,  High: 65  },
+  Medium: { Low: 50,  Medium: 80,  High: 120 },
+  Large:  { Low: 100, Medium: 140, High: 190 },
 }
 
 export function estimateLabourHours(sqft, density) {
@@ -34,12 +36,17 @@ export function estimateLabourHours(sqft, density) {
 
 const HOURLY_RATE = 22
 const OVERHEAD_PCT = 0.20
+export const ROYALTY_PCT = 0.07  // CT franchise royalty (7% of gross revenue)
 
-// Bid ranges: [min, max] per size bucket
+// Bid ranges for Clean Out base, by property size
+// Calibrated from 51 real Cedar Operations jobs (2025–2026):
+//   Small  → garages, studios, small apts:  $500–$4,000
+//   Medium → standard 2–3 bed homes:        $4,000–$8,500
+//   Large  → large homes / estates:         $8,000–$15,000
 const BID_RANGES = {
-  Small:  { min: 6000,  max: 7000  },
-  Medium: { min: 7000,  max: 8500  },
-  Large:  { min: 8500,  max: 12000 },
+  Small:  { min: 1500, max: 4000  },
+  Medium: { min: 4000, max: 8500  },
+  Large:  { min: 8500, max: 15000 },
 }
 
 // For Auction-only jobs, bid is lower (no labour-intensive cleanout)
