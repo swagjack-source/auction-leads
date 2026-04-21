@@ -10,39 +10,43 @@ export function getSizeBucket(sqft) {
   return 'Large'
 }
 
-// Labour hour estimates by size × density
-// Calibrated from real project data (Denver/Aurora area, 2025–2026)
-// One confirmed data point: medium home ~68 hrs at $22/hr = $1,504 labour
+// Labour hour estimates for Clean Out base, by size × density
+// Source: CT Denver SE payroll records, 42 projects, 2025–2026
+//   Small  ($1.5k–$4k jobs):  8–45 hrs observed  → med ~25 hrs
+//   Medium ($4k–$8.5k jobs):  30–65 hrs observed → med ~50 hrs
+//   Large  ($8.5k–$15k jobs): 62–162 hrs observed → med ~100 hrs
+// Density multipliers estimated (0.55× Low, 1.0× Med, 1.65× High)
 const LABOUR_HOURS = {
-  Small:  { Low: 20,  Medium: 40,  High: 65  },
-  Medium: { Low: 50,  Medium: 80,  High: 120 },
-  Large:  { Low: 100, Medium: 140, High: 190 },
+  Small:  { Low: 14, Medium: 25, High: 40  },
+  Medium: { Low: 28, Medium: 50, High: 82  },
+  Large:  { Low: 55, Medium: 100, High: 165 },
 }
 
 export function estimateLabourHours(sqft, density) {
   const size = getSizeBucket(sqft)
   const base = LABOUR_HOURS[size][density]
 
-  // Scale slightly within bucket based on exact sqft
+  // Scale up to 20% within bucket based on exact sqft
   const bucketMin = { Small: 0,    Medium: 1500, Large: 3500 }
   const bucketMax = { Small: 1500, Medium: 3500, Large: 6000 }
   const min = bucketMin[size]
   const max = bucketMax[size]
   const ratio = Math.min((sqft - min) / (max - min), 1)
-
-  // Increase by up to 20% within bucket
   return Math.round(base * (1 + ratio * 0.2))
 }
 
 const HOURLY_RATE = 22
-const OVERHEAD_PCT = 0.20
-export const ROYALTY_PCT = 0.07  // CT franchise royalty (7% of gross revenue)
+// Overhead averages 30–35% of labour (fuel, supplies, disposal, insurance)
+// Source: CT Denver SE P&L — Cathy Redeker 35%, Kim Valentine 23%, avg ~30%
+const OVERHEAD_PCT = 0.30
+// CT franchise royalty — confirmed 8.0% across all P&L records
+export const ROYALTY_PCT = 0.08
 
-// Bid ranges for Clean Out base, by property size
-// Calibrated from 51 real Cedar Operations jobs (2025–2026):
-//   Small  → garages, studios, small apts:  $500–$4,000
-//   Medium → standard 2–3 bed homes:        $4,000–$8,500
-//   Large  → large homes / estates:         $8,000–$15,000
+// Clean Out base bid ranges by property size
+// Source: 51 real Cedar Operations scope agreements + reconciliations (2025–2026)
+//   Small  → garages, studios, small apts
+//   Medium → standard 2–3 bed homes
+//   Large  → large homes, estates, full relocations
 const BID_RANGES = {
   Small:  { min: 1500, max: 4000  },
   Medium: { min: 4000, max: 8500  },
