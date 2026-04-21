@@ -181,14 +181,14 @@ const FEEDS = [
   {
     key: 'projects',
     label: 'Projects',
-    url: 'https://caringtransitions-system.netlify.app/api/calendar.ics',
+    url: 'https://homebase-crm.netlify.app/api/calendar.ics',
     color: '#A50050',
     desc: 'All-day blocks for scheduled jobs',
   },
   {
     key: 'consults',
     label: 'Consults',
-    url: 'https://caringtransitions-system.netlify.app/api/consults.ics',
+    url: 'https://homebase-crm.netlify.app/api/consults.ics',
     color: '#7c3aed',
     desc: 'Timed consult appointments with assignee & notes',
   },

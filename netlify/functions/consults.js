@@ -1,5 +1,5 @@
 // Live .ics consult calendar feed
-// URL: https://caringtransitions-system.netlify.app/api/consults.ics
+// URL: https://homebase-crm.netlify.app/api/consults.ics
 
 const { createClient } = require('@supabase/supabase-js')
 
@@ -44,7 +44,7 @@ exports.handler = async function () {
 
     const lines = [
       'BEGIN:VEVENT',
-      `UID:consult-${lead.id}@caringtransitions-system.netlify.app`,
+      `UID:consult-${lead.id}@homebase-crm.netlify.app`,
       `DTSTART:${fmtIcal(start)}`,
       `DTEND:${fmtIcal(end)}`,
       `SUMMARY:${esc(summary)}`,

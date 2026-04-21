@@ -1,5 +1,5 @@
 // Live .ics calendar feed — subscribe to this URL in Google/Apple Calendar
-// URL: https://caringtransitions-system.netlify.app/api/calendar.ics
+// URL: https://homebase-crm.netlify.app/api/calendar.ics
 
 const { createClient } = require('@supabase/supabase-js')
 
@@ -38,7 +38,7 @@ exports.handler = async function () {
 
     const lines = [
       'BEGIN:VEVENT',
-      `UID:lead-${lead.id}@caringtransitions-system.netlify.app`,
+      `UID:lead-${lead.id}@homebase-crm.netlify.app`,
       `DTSTART;VALUE=DATE:${start}`,
       `DTEND;VALUE=DATE:${end}`,
       `SUMMARY:${esc(summary)}`,
