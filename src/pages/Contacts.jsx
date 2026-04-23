@@ -181,13 +181,14 @@ export default function Contacts() {
   async function fetchContacts() {
     setLoading(true)
     const { data } = await supabase.from('contacts').select('*').order('name')
-    setContacts(data || [])
+    setContacts((data || []).map(c => ({ ...c, type: c.category })))
     setLoading(false)
   }
 
   async function handleSave(form) {
     const payload = {
-      name: form.name.trim(), company: form.company || null, type: form.type || null,
+      name: form.name.trim(), company: form.company || null,
+      category: form.type || null,
       phone: form.phone || null, email: form.email || null,
       address: form.address || null, notes: form.notes || null,
       organization_id: organizationId,

@@ -54,20 +54,25 @@ async function uploadToCloudinary(file) {
   return res.json()
 }
 
+const PRESET_TAGS = ['Sales', 'Operations', 'Legal', 'HR', 'Finance', 'Client-facing', 'Internal', 'Template', 'Training']
+
 function DocModal({ doc, onClose, onSave }) {
   const isNew = !doc?.id
   const [form, setForm] = useState({
     name:  doc?.name  || '',
     type:  doc?.type  || 'SOP',
-    tags:  (doc?.tags || []).join(', '),
     notes: doc?.notes || '',
   })
+  const [tags, setTags] = useState(doc?.tags || [])
+  const [tagInput, setTagInput] = useState('')
   const [file, setFile] = useState(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
   const fileRef = useRef(null)
 
   function set(k, v) { setForm(f => ({ ...f, [k]: v })) }
+  function addTag(t) { const v = t.trim(); if (v && !tags.includes(v)) setTags(ts => [...ts, v]); setTagInput('') }
+  function removeTag(t) { setTags(ts => ts.filter(x => x !== t)) }
 
   async function handleSave() {
     if (!form.name.trim()) { setError('Name is required'); return }
@@ -78,7 +83,6 @@ function DocModal({ doc, onClose, onSave }) {
         const res = await uploadToCloudinary(file)
         url = res.secure_url
       }
-      const tags = form.tags.split(',').map(t => t.trim()).filter(Boolean)
       await onSave({
         ...(doc || {}),
         name: form.name.trim(),
@@ -136,8 +140,21 @@ function DocModal({ doc, onClose, onSave }) {
               </select>
             </div>
             <div>
-              <label style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--ink-3)', display: 'block', marginBottom: 5 }}>Tags (comma-separated)</label>
-              <input value={form.tags} onChange={e => set('tags', e.target.value)} placeholder="Sales, Ops, Legal" style={inputStyle} />
+              <label style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--ink-3)', display: 'block', marginBottom: 5 }}>Tags</label>
+              <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '6px 8px', background: 'var(--panel)', minHeight: 36, display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+                {tags.map(t => (
+                  <span key={t} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11.5, background: 'var(--accent-soft)', color: 'var(--accent-ink)', padding: '2px 8px', borderRadius: 999 }}>
+                    {t}
+                    <button onClick={() => removeTag(t)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent-ink)', padding: 0, display: 'flex', lineHeight: 1 }}>×</button>
+                  </span>
+                ))}
+                <input value={tagInput} onChange={e => setTagInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addTag(tagInput) } }} placeholder={tags.length === 0 ? 'Add tags…' : ''} style={{ border: 'none', outline: 'none', background: 'transparent', fontSize: 12.5, fontFamily: 'inherit', color: 'var(--ink-1)', minWidth: 80, flex: 1 }} />
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}>
+                {PRESET_TAGS.filter(t => !tags.includes(t)).map(t => (
+                  <button key={t} onClick={() => addTag(t)} style={{ fontSize: 11, padding: '2px 8px', borderRadius: 999, border: '1px solid var(--line)', background: 'var(--bg)', color: 'var(--ink-3)', cursor: 'pointer', fontFamily: 'inherit' }}>{t}</button>
+                ))}
+              </div>
             </div>
           </div>
 
@@ -387,7 +404,7 @@ export default function Library() {
                 <Upload size={13} strokeWidth={1.8} /> Upload
               </button>
               <button onClick={() => { setEditDoc(null); setShowModal(true) }} className="btn btn-primary" style={{ fontSize: 12.5, padding: '7px 13px 7px 10px', borderRadius: 10 }}>
-                <Plus size={13} strokeWidth={2.5} /> New Document
+                <Plus size={13} strokeWidth={2.5} /> New Asset
               </button>
             </div>
           </div>

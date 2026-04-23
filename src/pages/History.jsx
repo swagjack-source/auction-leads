@@ -241,6 +241,8 @@ export default function History() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [importState, setImportState] = useState('idle') // idle | importing | done | error
   const [importResult, setImportResult] = useState(null)
+  const [sortKey, setSortKey] = useState('job_date')
+  const [sortDir, setSortDir] = useState('desc')
   const fileInputRef = useRef()
 
   useEffect(() => { fetchProjects() }, [])

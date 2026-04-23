@@ -248,10 +248,10 @@ function AddMeetingModal({ contacts, members, onClose, onAdded, existing }) {
     const query = existing
       ? supabase.from('meetings').update(payload).eq('id', existing.id)
       : supabase.from('meetings').insert(payload)
-    const { data, error } = await query.select('*, contacts(name, category)').single()
+    const { error } = await query
     setSaving(false)
     if (error) { setError(error.message); return }
-    onAdded(data)
+    onAdded()
     onClose()
   }
 
@@ -290,7 +290,7 @@ function AddMeetingModal({ contacts, members, onClose, onAdded, existing }) {
 
           {/* Assignee */}
           <div>
-            <label style={labelStyle}>Assignee</label>
+            <label style={labelStyle}>Assigned To <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(manage via "Manage Team")</span></label>
             <select value={form.assignee_id} onChange={e => set('assignee_id', e.target.value)} style={inputStyle}>
               <option value="">— No assignee —</option>
               {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
@@ -683,7 +683,7 @@ export default function CalendarView() {
           contacts={contacts}
           members={members}
           onClose={() => setShowAddMeeting(false)}
-          onAdded={m => { setMeetings(ms => [...ms, m]); setShowAddMeeting(false) }}
+          onAdded={() => { setShowAddMeeting(false); fetchAll() }}
         />
       )}
       {editingMeeting && (
@@ -692,9 +692,9 @@ export default function CalendarView() {
           members={members}
           existing={editingMeeting}
           onClose={() => setEditingMeeting(null)}
-          onAdded={updated => {
-            setMeetings(ms => ms.map(m => m.id === updated.id ? updated : m))
+          onAdded={() => {
             setEditingMeeting(null)
+            fetchAll()
           }}
         />
       )}

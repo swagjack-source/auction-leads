@@ -507,7 +507,7 @@ function QuickActions({ onOpenSchedule, onNewMeeting }) {
   const actions = [
     { Icon: Wallet,      label: 'Send invoice',    onClick: () => {} },
     { Icon: Phone,       label: 'Log call back',   onClick: () => {} },
-    { Icon: CalendarDays,label: 'Schedule crew',   onClick: () => navigate('/schedule') },
+    { Icon: CalendarDays,label: 'Schedule crew',   onClick: () => navigate('/projects') },
     { Icon: Users,       label: 'Run payroll',     onClick: () => {} },
     { Icon: Plus,        label: 'New meeting',     onClick: onNewMeeting },
     { Icon: Gavel,       label: 'Post auction',    onClick: () => {} },

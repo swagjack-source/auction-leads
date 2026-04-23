@@ -23,8 +23,26 @@ const OUTCOME_FILTERS = [
   { key: 'Backlog', label: 'Backlog', color: 'var(--ink-3)',soft: 'var(--hover)'     },
 ]
 
-function BoardHeader({ jobFilter, setJobFilter, outcomeFilter, setOutcomeFilter, view, setView, onImport, fileRef }) {
+function BoardHeader({ jobFilter, setJobFilter, outcomeFilter, setOutcomeFilter, view, setView, onImport, fileRef, selectedMember, setSelectedMember, sortBy, setSortBy }) {
   const { members } = useTeam()
+  const [showSort, setShowSort] = useState(false)
+  const sortRef = useRef(null)
+
+  useEffect(() => {
+    if (!showSort) return
+    function handle(e) { if (sortRef.current && !sortRef.current.contains(e.target)) setShowSort(false) }
+    document.addEventListener('mousedown', handle)
+    return () => document.removeEventListener('mousedown', handle)
+  }, [showSort])
+
+  const SORT_OPTIONS = [
+    { key: 'date_desc', label: 'Newest first' },
+    { key: 'date_asc',  label: 'Oldest first' },
+    { key: 'score',     label: 'Deal score ↓' },
+    { key: 'value',     label: 'Est. value ↓' },
+    { key: 'name',      label: 'Name A–Z' },
+  ]
+
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 10,
@@ -90,31 +108,49 @@ function BoardHeader({ jobFilter, setJobFilter, outcomeFilter, setOutcomeFilter,
 
       <div style={{ flex: 1 }} />
 
-      {/* Controls */}
-      <button style={ctrlBtn}><Filter size={13} strokeWidth={1.8} /> Filter</button>
-      <button style={ctrlBtn}><ArrowUpDown size={13} strokeWidth={1.8} /> Sort</button>
-      <button style={ctrlBtn}>Group: Stage <ChevronDown size={12} strokeWidth={1.8} /></button>
+      {/* Sort dropdown */}
+      <div style={{ position: 'relative' }} ref={sortRef}>
+        <button onClick={() => setShowSort(s => !s)} style={{ ...ctrlBtn, background: sortBy !== 'date_desc' ? 'var(--accent-soft)' : 'var(--panel)', color: sortBy !== 'date_desc' ? 'var(--accent-ink)' : 'var(--ink-2)' }}>
+          <ArrowUpDown size={13} strokeWidth={1.8} /> Sort <ChevronDown size={11} strokeWidth={1.8} />
+        </button>
+        {showSort && (
+          <div style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 200, background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, boxShadow: '0 4px 20px rgba(0,0,0,0.15)', minWidth: 160, overflow: 'hidden' }}>
+            {SORT_OPTIONS.map(o => (
+              <button key={o.key} onClick={() => { setSortBy(o.key); setShowSort(false) }} style={{ display: 'block', width: '100%', padding: '8px 12px', border: 'none', background: sortBy === o.key ? 'var(--accent-soft)' : 'transparent', color: sortBy === o.key ? 'var(--accent-ink)' : 'var(--ink-2)', fontSize: 12.5, fontWeight: sortBy === o.key ? 600 : 400, cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit' }}>{o.label}</button>
+            ))}
+          </div>
+        )}
+      </div>
+
       <button onClick={() => fileRef?.current?.click()} style={ctrlBtn}><Upload size={13} strokeWidth={1.8} /> Import</button>
       <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }} onChange={onImport} />
 
-      {/* Team avatars */}
-      <div style={{ display: 'flex', marginLeft: 4 }}>
+      {/* Team avatars — click to filter */}
+      <div style={{ display: 'flex', marginLeft: 4, alignItems: 'center' }}>
         {members.slice(0, 4).map((m, i) => (
-          <div key={m.id} title={m.name} style={{
-            width: 24, height: 24, borderRadius: '50%',
-            background: m.color || '#6B7280',
-            color: 'white', fontSize: 9, fontWeight: 700,
-            display: 'grid', placeItems: 'center',
-            border: '2px solid var(--panel)',
-            marginLeft: i === 0 ? 0 : -7,
-            zIndex: members.length - i,
-          }}>
-            {(m.initials || m.name[0]).toUpperCase()}
+          <div
+            key={m.id}
+            title={m.name}
+            onClick={() => setSelectedMember(selectedMember === m.id ? null : m.id)}
+            style={{
+              width: 26, height: 26, borderRadius: '50%',
+              background: m.color || '#6B7280',
+              color: 'white', fontSize: 9, fontWeight: 700,
+              display: 'grid', placeItems: 'center',
+              border: selectedMember === m.id ? '2px solid var(--accent)' : '2px solid var(--panel)',
+              marginLeft: i === 0 ? 0 : -7,
+              zIndex: members.length - i,
+              cursor: 'pointer',
+              outline: selectedMember === m.id ? '2px solid var(--accent)' : 'none',
+              outlineOffset: 1,
+              opacity: selectedMember && selectedMember !== m.id ? 0.45 : 1,
+            }}>
+            {(m.initials || m.name?.[0] || '?').toUpperCase()}
           </div>
         ))}
         {members.length > 4 && (
           <div style={{
-            width: 24, height: 24, borderRadius: '50%',
+            width: 26, height: 26, borderRadius: '50%',
             background: 'var(--panel)', color: 'var(--ink-3)',
             fontSize: 9, fontWeight: 700,
             display: 'grid', placeItems: 'center',
@@ -122,6 +158,9 @@ function BoardHeader({ jobFilter, setJobFilter, outcomeFilter, setOutcomeFilter,
             marginLeft: -7,
             boxShadow: '0 0 0 1px var(--line)',
           }}>+{members.length - 4}</div>
+        )}
+        {selectedMember && (
+          <button onClick={() => setSelectedMember(null)} title="Clear member filter" style={{ marginLeft: 6, padding: '2px 6px', borderRadius: 6, border: '1px solid var(--accent)', background: 'var(--accent-soft)', color: 'var(--accent-ink)', fontSize: 10, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>✕</button>
         )}
       </div>
     </div>
@@ -300,6 +339,8 @@ export default function Pipeline() {
   const [search, setSearch] = useState('')
   const [jobFilter, setJobFilter] = useState('All')
   const [outcomeFilter, setOutcomeFilter] = useState(null)
+  const [selectedMember, setSelectedMember] = useState(null)
+  const [sortBy, setSortBy] = useState('date_desc')
   const [draggingId, setDraggingId] = useState(null)
   const [hoverCol, setHoverCol] = useState(null)
   const hoverColRef = useRef(null)
@@ -459,14 +500,22 @@ export default function Pipeline() {
     setSelectedLead({ ...EMPTY_LEAD })
   }
 
-  const filtered = useMemo(() => leads.filter(l => {
-    if (search && !l.name.toLowerCase().includes(search.toLowerCase()) &&
-        !l.address?.toLowerCase().includes(search.toLowerCase()) &&
-        !l.phone?.includes(search)) return false
-    if (jobFilter !== 'All' && l.job_type !== jobFilter) return false
-    if (outcomeFilter && l.status !== outcomeFilter) return false
-    return true
-  }), [leads, search, jobFilter, outcomeFilter])
+  const filtered = useMemo(() => {
+    let out = leads.filter(l => {
+      if (search && !l.name.toLowerCase().includes(search.toLowerCase()) &&
+          !l.address?.toLowerCase().includes(search.toLowerCase()) &&
+          !l.phone?.includes(search)) return false
+      if (jobFilter !== 'All' && l.job_type !== jobFilter) return false
+      if (outcomeFilter && l.status !== outcomeFilter) return false
+      if (selectedMember && l.assigned_to !== selectedMember) return false
+      return true
+    })
+    if (sortBy === 'date_asc')  out = [...out].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+    if (sortBy === 'score')     out = [...out].sort((a, b) => (b.deal_score || 0) - (a.deal_score || 0))
+    if (sortBy === 'value')     out = [...out].sort((a, b) => (b._scoreDetails?.recommendedBid || 0) - (a._scoreDetails?.recommendedBid || 0))
+    if (sortBy === 'name')      out = [...out].sort((a, b) => a.name.localeCompare(b.name))
+    return out
+  }, [leads, search, jobFilter, outcomeFilter, selectedMember, sortBy])
 
   const grouped = useMemo(() => {
     const map = {}
@@ -553,6 +602,8 @@ export default function Pipeline() {
         outcomeFilter={outcomeFilter} setOutcomeFilter={setOutcomeFilter}
         view={view} setView={setView}
         onImport={handleImportLeads} fileRef={importFileRef}
+        selectedMember={selectedMember} setSelectedMember={setSelectedMember}
+        sortBy={sortBy} setSortBy={setSortBy}
       />
 
       {/* View area */}

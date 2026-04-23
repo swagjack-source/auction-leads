@@ -36,6 +36,31 @@ function getProjectStatus(lead) {
   return 'Scored'
 }
 
+function exportCSV(rows) {
+  const headers = ['Name', 'Address', 'Job Type', 'Status', 'Square Footage', 'Density', 'Quality', 'Deal Score', 'Rec. Bid', 'Notes']
+  const csvRows = [headers.join(',')]
+  for (const l of rows) {
+    csvRows.push([
+      `"${(l.name || '').replace(/"/g, '""')}"`,
+      `"${(l.address || '').replace(/"/g, '""')}"`,
+      l.job_type || '',
+      l.status || '',
+      l.square_footage || '',
+      l.density || '',
+      l.item_quality_score || '',
+      l.deal_score != null ? l.deal_score.toFixed(1) : '',
+      l._scoreDetails?.recommendedBid || '',
+      `"${(l.notes || '').replace(/"/g, '""')}"`,
+    ].join(','))
+  }
+  const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = `projects-export-${new Date().toISOString().slice(0, 10)}.csv`
+  a.click()
+  URL.revokeObjectURL(a.href)
+}
+
 function downloadCSVTemplate() {
   const csv = [
     'name,job_type,square_footage,density,item_quality_score,zip_code,address,notes',
@@ -659,6 +684,9 @@ export default function Projects() {
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => exportCSV(tab === 'current' ? currentLeads : completedLeads)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 13px', borderRadius: 9, border: '1px solid var(--line)', background: 'var(--panel)', color: 'var(--ink-2)', fontSize: 12.5, fontWeight: 500, cursor: 'pointer', boxShadow: 'var(--shadow-1)', fontFamily: 'inherit' }}>
+            <Download size={13} strokeWidth={1.8} /> Export CSV
+          </button>
           <button onClick={downloadCSVTemplate} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 13px', borderRadius: 9, border: '1px solid var(--line)', background: 'var(--panel)', color: 'var(--ink-2)', fontSize: 12.5, fontWeight: 500, cursor: 'pointer', boxShadow: 'var(--shadow-1)', fontFamily: 'inherit' }}>
             <Download size={13} strokeWidth={1.8} /> CSV Template
           </button>
@@ -699,6 +727,7 @@ export default function Projects() {
           project={selectedProject}
           onClose={() => setSelectedProject(null)}
           onOpenScorer={p => { setSelectedProject(null); setScorerProject(p); }}
+          onProjectUpdated={fetchLeads}
           onDelete={async id => {
             await supabase.from('leads').delete().eq('id', id)
             setLeads(prev => prev.filter(l => l.id !== id))

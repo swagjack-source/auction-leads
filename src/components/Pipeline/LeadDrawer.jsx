@@ -122,8 +122,8 @@ export default function LeadDrawer({ lead, onClose, onEdit, onMoveStatus, onChec
       flex: 1.5, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
       gap: 6, padding: '8px 12px', borderRadius: 9,
       border: 'none', background: bg,
-      color: 'white', fontSize: 13, fontWeight: 600, cursor: 'pointer',
-      fontFamily: 'inherit',
+      color: 'white', fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+      fontFamily: 'inherit', whiteSpace: 'nowrap',
     }
   }
 
@@ -138,9 +138,9 @@ export default function LeadDrawer({ lead, onClose, onEdit, onMoveStatus, onChec
           flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           gap: 6, padding: '8px 12px', borderRadius: 9,
           border: '1px solid var(--line)', background: 'var(--panel)',
-          color: 'var(--ink-2)', fontSize: 13, fontWeight: 600,
+          color: 'var(--ink-2)', fontSize: 12.5, fontWeight: 600,
           textDecoration: 'none', cursor: lead.phone ? 'pointer' : 'default',
-          opacity: lead.phone ? 1 : 0.4,
+          opacity: lead.phone ? 1 : 0.4, whiteSpace: 'nowrap',
         }}
       >
         <Phone size={13} strokeWidth={1.8} /> Call
@@ -152,10 +152,10 @@ export default function LeadDrawer({ lead, onClose, onEdit, onMoveStatus, onChec
         flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
         gap: 6, padding: '8px 12px', borderRadius: 9,
         border: '1px solid var(--line)', background: 'var(--panel)',
-        color: 'var(--ink-2)', fontSize: 13, fontWeight: 600, cursor: 'pointer',
-        fontFamily: 'inherit',
+        color: 'var(--ink-2)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+        fontFamily: 'inherit', whiteSpace: 'nowrap',
       }}>
-        <Clock size={13} strokeWidth={1.8} /> Add note
+        <Clock size={13} strokeWidth={1.8} /> Note
       </button>
     )
 
@@ -181,7 +181,7 @@ export default function LeadDrawer({ lead, onClose, onEdit, onMoveStatus, onChec
             onClick={() => navigate('/scorer', { state: { lead } })}
             style={primaryBtn('#4A6FA5')}
           >
-            <Calculator size={13} strokeWidth={1.8} /> Open Deal Scorer
+            <Calculator size={13} strokeWidth={1.8} /> Deal Scorer
           </button>
         </>
       )

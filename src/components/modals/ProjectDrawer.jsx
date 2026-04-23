@@ -123,9 +123,18 @@ function FileIcon({ name = '' }) {
 
 // ── OVERVIEW TAB ─────────────────────────────────────────────
 
-function OverviewTab({ project, members, isCompleted, logs, onLog }) {
+function OverviewTab({ project, members, isCompleted, logs, onLog, onAssign }) {
   const d = project._scoreDetails || {}
   const assignedMember = members.find(m => m.id === project.assigned_to)
+  const [showAssignMenu, setShowAssignMenu] = useState(false)
+  const assignRef = useRef(null)
+
+  useEffect(() => {
+    if (!showAssignMenu) return
+    function handle(e) { if (assignRef.current && !assignRef.current.contains(e.target)) setShowAssignMenu(false) }
+    document.addEventListener('mousedown', handle)
+    return () => document.removeEventListener('mousedown', handle)
+  }, [showAssignMenu])
 
   return (
     <div>
@@ -169,7 +178,7 @@ function OverviewTab({ project, members, isCompleted, logs, onLog }) {
       </Section>
 
       <Section label="Crew">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 6 }} ref={assignRef}>
           {assignedMember ? (
             <Avatar name={assignedMember.name} size={30} />
           ) : (
@@ -177,9 +186,28 @@ function OverviewTab({ project, members, isCompleted, logs, onLog }) {
               <Plus size={12} color="var(--ink-3)" />
             </div>
           )}
-          <button style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent-ink)', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px', borderRadius: 6 }}>
-            + Assign
+          <button
+            onClick={() => setShowAssignMenu(s => !s)}
+            style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent-ink)', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px', borderRadius: 6 }}
+          >
+            {assignedMember ? `${assignedMember.name} ▾` : '+ Assign'}
           </button>
+          {showAssignMenu && (
+            <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 100, background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, boxShadow: '0 4px 20px rgba(0,0,0,0.15)', minWidth: 180, overflow: 'hidden', marginTop: 4 }}>
+              {members.length === 0 && (
+                <div style={{ padding: '10px 12px', fontSize: 12, color: 'var(--ink-3)' }}>No team members yet. Add via Calendar → Manage Team.</div>
+              )}
+              {members.map(m => (
+                <button key={m.id} onClick={() => { onAssign(m.id); setShowAssignMenu(false) }} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 12px', border: 'none', background: project.assigned_to === m.id ? 'var(--accent-soft)' : 'transparent', color: project.assigned_to === m.id ? 'var(--accent-ink)' : 'var(--ink-1)', fontSize: 12.5, cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit' }}>
+                  <div style={{ width: 20, height: 20, borderRadius: '50%', background: m.color || avatarColor(m.name), color: 'white', display: 'grid', placeItems: 'center', fontSize: 9, fontWeight: 700, flexShrink: 0 }}>{(m.initials || m.name?.[0] || '?').toUpperCase()}</div>
+                  {m.name}
+                </button>
+              ))}
+              {assignedMember && (
+                <button onClick={() => { onAssign(null); setShowAssignMenu(false) }} style={{ display: 'block', width: '100%', padding: '8px 12px', border: 'none', borderTop: '1px solid var(--line)', background: 'transparent', color: 'var(--ink-3)', fontSize: 12, cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit' }}>Remove assignee</button>
+              )}
+            </div>
+          )}
         </div>
       </Section>
 
@@ -734,7 +762,7 @@ function LogModal({ category, onClose, onSave }) {
 
 // ── MAIN DRAWER ───────────────────────────────────────────────
 
-export default function ProjectDrawer({ project, onClose, onDelete }) {
+export default function ProjectDrawer({ project, onClose, onDelete, onProjectUpdated }) {
   const { organizationId } = useAuth()
   const { members } = useTeam()
   const [activeTab, setActiveTab] = useState('overview')
@@ -782,6 +810,11 @@ export default function ProjectDrawer({ project, onClose, onDelete }) {
   async function convertToOngoing() {
     await supabase.from('leads').update({ status: 'Project Scheduled' }).eq('id', project.id)
     onClose()
+  }
+
+  async function handleAssign(memberId) {
+    await supabase.from('leads').update({ assigned_to: memberId }).eq('id', project.id)
+    onProjectUpdated?.()
   }
 
   function copyLink() {
@@ -884,6 +917,7 @@ export default function ProjectDrawer({ project, onClose, onDelete }) {
               isCompleted={isCompleted}
               logs={logs}
               onLog={cat => setLogModal(cat)}
+              onAssign={handleAssign}
             />
           )}
           {activeTab === 'scorer' && <ScorerTab project={project} />}

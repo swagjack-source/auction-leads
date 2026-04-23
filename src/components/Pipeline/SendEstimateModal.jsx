@@ -14,8 +14,8 @@ export default function SendEstimateModal({ lead, scoreDetails, onClose, onSent 
   const bid          = scoreDetails?.recommendedBid ?? 0
   const labourHours  = scoreDetails?.labourHours ?? 0
   const labourCost   = labourHours * 22
-  const overhead     = Math.round(labourCost * 0.15)
-  const total        = labourCost + overhead
+  const overhead     = Math.round(labourCost * 0.30)
+  const total        = bid
 
   async function handleSend() {
     if (!email.trim()) { setError('Email is required'); return }
@@ -93,7 +93,7 @@ export default function SendEstimateModal({ lead, scoreDetails, onClose, onSent 
           <div style={{ border: '1px solid var(--line)', borderRadius: 10, overflow: 'hidden', marginBottom: 16 }}>
             {[
               { label: `Labour — ${labourHours} hrs @ $22/hr`, amount: labourCost },
-              { label: 'Overhead (15%)',                        amount: overhead   },
+              { label: 'Overhead (30%)',                        amount: overhead   },
             ].map(({ label, amount }) => (
               <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 14px', borderBottom: '1px solid var(--line-2)', fontSize: 13, color: 'var(--ink-2)' }}>
                 <span>{label}</span>

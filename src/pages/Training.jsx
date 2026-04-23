@@ -220,8 +220,17 @@ function ModuleCard({ guide, onClick, onEdit, onDelete, index }) {
           <div style={{ fontSize: 10.5, color: 'var(--ink-4)', marginTop: 3, textAlign: 'right' }}>{progress}%</div>
         </div>
 
-        {/* Button */}
-        <button onClick={onClick} style={btnStyle}>{btnLabel}</button>
+        {/* Button row */}
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button onClick={onClick} style={{ ...btnStyle, flex: 1 }}>{btnLabel}</button>
+          <button
+            onClick={e => { e.stopPropagation(); onEdit() }}
+            title="Edit guide"
+            style={{ padding: '8px 10px', borderRadius: 9, border: '1px solid var(--line)', background: 'var(--bg)', color: 'var(--ink-3)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          >
+            <Pencil size={13} strokeWidth={1.8} />
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -315,19 +324,15 @@ export default function Training() {
           </div>
         </div>
 
-        {/* Stats bar */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
-          {[
-            { label: 'Completed',       value: `${completedCount} of ${guides.length || 12}`, sub: '' },
-            { label: 'In Progress',     value: inProgressCount,  sub: 'modules' },
-            { label: 'Hours this month', value: '8.2',            sub: 'logged' },
-            { label: 'Team Average',    value: '82%',            sub: 'completion' },
-          ].map(({ label, value, sub }) => (
-            <div key={label} style={{ background: 'var(--bg)', borderRadius: 10, padding: '10px 14px', border: '1px solid var(--line)' }}>
-              <div className="tnum" style={{ fontSize: 22, fontWeight: 700, color: 'var(--ink-1)', letterSpacing: '-0.02em', lineHeight: 1 }}>{value}</div>
-              {sub && <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 2 }}>{sub}</div>}
-              <div style={{ fontSize: 11.5, color: 'var(--ink-3)', fontWeight: 500, marginTop: 4 }}>{label}</div>
-            </div>
+        {/* Search + category filter */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 10, padding: '6px 10px', minWidth: 200 }}>
+            <Search size={13} strokeWidth={1.8} color="var(--ink-4)" />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search guides…" style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontSize: 12.5, fontFamily: 'inherit', color: 'var(--ink-1)' }} />
+            {search && <button onClick={() => setSearch('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-4)', padding: 0, display: 'flex' }}><X size={11} /></button>}
+          </div>
+          {categories.map(cat => (
+            <button key={cat} onClick={() => setFilterCat(cat)} style={{ padding: '5px 11px', borderRadius: 999, border: `1px solid ${filterCat === cat ? 'var(--accent)' : 'var(--line)'}`, background: filterCat === cat ? 'var(--accent-soft)' : 'var(--panel)', color: filterCat === cat ? 'var(--accent-ink)' : 'var(--ink-2)', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>{cat}</button>
           ))}
         </div>
       </div>
