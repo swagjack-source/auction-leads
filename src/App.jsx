@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { BrowserRouter, Routes, Route, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { Menu, Bell, Moon, Sun, Sparkles } from 'lucide-react'
+import { Menu, Bell, Moon, Sun, HelpCircle } from 'lucide-react'
+import Tour from './components/Tour'
 import { useTheme } from './lib/ThemeContext'
 import ErrorBoundary from './components/ErrorBoundary'
 import PrivateRoute from './components/PrivateRoute'
@@ -11,6 +12,7 @@ import DealScorer from './pages/DealScorer'
 import CalendarPage from './pages/CalendarPage'
 import Contacts from './pages/Contacts'
 import Projects from './pages/Projects'
+import BDR from './pages/BDR'
 import Employees from './pages/Employees'
 import Training from './pages/Training'
 import Library from './pages/Library'
@@ -33,6 +35,7 @@ const PAGE_TITLES = {
   '/projects':   'Projects',
   '/scorer':     'Deal Scorer',
   '/calendar':   'Calendar',
+  '/bdr':        'BDR',
   '/contacts':   'Contacts',
   '/employees':  'Employees',
   '/training':   'Training',
@@ -45,7 +48,7 @@ const PAGE_TITLES = {
   '/saved':      'Saved Views',
 }
 
-function Topbar({ onMenuClick, isMobile }) {
+function Topbar({ onMenuClick, isMobile, onStartTour }) {
   const location = useLocation()
   const navigate = useNavigate()
   const { theme, toggle } = useTheme()
@@ -104,7 +107,9 @@ function Topbar({ onMenuClick, isMobile }) {
           background: '#C84A4A', border: '1.5px solid var(--bg)',
         }} />
       </button>
-      <button style={iconBtn} title="AI assistant"><Sparkles size={16} strokeWidth={1.7} /></button>
+      <button onClick={onStartTour} style={iconBtn} title="Take a tour">
+        <HelpCircle size={16} strokeWidth={1.7} />
+      </button>
 
       <div style={{ width: 1, height: 22, background: 'var(--line)' }} />
 
@@ -164,6 +169,7 @@ const iconBtn = {
 function AppLayout() {
   const isMobile = useIsMobile()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [tourActive, setTourActive] = useState(false)
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: 'var(--bg)' }}>
@@ -180,11 +186,12 @@ function AppLayout() {
       )}
 
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-        <Topbar onMenuClick={() => setSidebarOpen(true)} isMobile={isMobile} />
+        <Topbar onMenuClick={() => setSidebarOpen(true)} isMobile={isMobile} onStartTour={() => setTourActive(true)} />
         <main style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           <Outlet />
         </main>
       </div>
+      {tourActive && <Tour onClose={() => setTourActive(false)} />}
     </div>
   )
 }
@@ -204,6 +211,7 @@ export default function App() {
                     <Route path="/"          element={<PrivateRoute><Pipeline /></PrivateRoute>} />
                     <Route path="/scorer"    element={<PrivateRoute><DealScorer /></PrivateRoute>} />
                     <Route path="/calendar"  element={<PrivateRoute><CalendarPage /></PrivateRoute>} />
+                    <Route path="/bdr"       element={<PrivateRoute><BDR /></PrivateRoute>} />
                     <Route path="/contacts"  element={<PrivateRoute><Contacts /></PrivateRoute>} />
                     <Route path="/projects"  element={<PrivateRoute><Projects /></PrivateRoute>} />
                     <Route path="/employees" element={<PrivateRoute><Employees /></PrivateRoute>} />

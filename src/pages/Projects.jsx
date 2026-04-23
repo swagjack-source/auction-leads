@@ -1,6 +1,8 @@
-import { useState, useEffect, useRef, useMemo, useId } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { Download, Upload, Plus, Search, MapPin, TrendingUp, Star, X } from 'lucide-react'
+import * as XLSX from 'xlsx'
 import PortfolioBuilderModal from '../components/modals/PortfolioBuilderModal'
+import ProjectDrawer from '../components/modals/ProjectDrawer'
 import { supabase } from '../lib/supabase'
 import { calculateDeal } from '../lib/scoring'
 import { useAuth } from '../lib/AuthContext'
@@ -311,6 +313,10 @@ function CurrentProjectsTab({ rows, onOpen, onBuildDeck }) {
   const avgScore = scored.length ? scored.reduce((s, l) => s + l.deal_score, 0) / scored.length : null
   const wonCount = filtered.filter(l => l.status === 'Won').length
 
+  const topScored = scored.length ? [...scored].sort((a, b) => (b.deal_score || 0) - (a.deal_score || 0))[0] : null
+  const withBid = filtered.filter(l => l._scoreDetails?.recommendedBid)
+  const topValue = withBid.length ? [...withBid].sort((a, b) => (b._scoreDetails?.recommendedBid || 0) - (a._scoreDetails?.recommendedBid || 0))[0] : null
+
   return (
     <div style={{ padding: '0 28px 28px' }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 16 }}>
@@ -319,6 +325,31 @@ function CurrentProjectsTab({ rows, onOpen, onBuildDeck }) {
         <StatMini label="Avg Deal Score" value={avgScore != null ? avgScore.toFixed(1) : '—'} suffix="out of 10" />
         <StatMini label="Pipeline Value" value={totalValue > 0 ? `$${(totalValue / 1000).toFixed(0)}k` : '—'} suffix="estimated" />
       </div>
+
+      {(topScored || topValue) && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+          {topScored && (
+            <HighlightCard
+              label="Top Score"
+              client={topScored.name}
+              period={topScored.address || topScored.zip_code || '—'}
+              amount={`${topScored.deal_score?.toFixed(1)}/10`}
+              margin={topScored.job_type || '—'}
+              positive
+            />
+          )}
+          {topValue && (
+            <HighlightCard
+              label="Highest Value"
+              client={topValue.name}
+              period={topValue.address || topValue.zip_code || '—'}
+              amount={`$${(topValue._scoreDetails?.recommendedBid || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+              margin={`${topValue.deal_score?.toFixed(1) || '—'}/10 score`}
+              positive
+            />
+          )}
+        </div>
+      )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, padding: '6px 10px', minWidth: 240 }}>
@@ -405,9 +436,21 @@ function CompletedProjectsTab({ rows }) {
     ? (withMargin.reduce((s, l) => s + (l._scoreDetails?.profitMarginPct || 0), 0) / withMargin.length).toFixed(0)
     : null
 
-  const withProfit = filtered.filter(l => l._scoreDetails?.estimatedProfit)
-  const best  = withProfit.length ? [...withProfit].sort((a, b) => (b._scoreDetails?.estimatedProfit || 0) - (a._scoreDetails?.estimatedProfit || 0))[0] : null
-  const worst = withProfit.length ? [...withProfit].sort((a, b) => (a._scoreDetails?.profitMarginPct || 0) - (b._scoreDetails?.profitMarginPct || 0))[0] : null
+  function parseNotes(notes, key) {
+    const m = String(notes || '').match(new RegExp(key + ':\\s*\\$?([\\d,.-]+)', 'i'))
+    return m ? parseFloat(m[1].replace(/,/g, '')) : null
+  }
+  function getRevenue(l) { return l._scoreDetails?.recommendedBid || parseNotes(l.notes, 'Revenue') || 0 }
+  function getProfit(l)  { return l._scoreDetails?.estimatedProfit || parseNotes(l.notes, 'Net profit') || 0 }
+  function getMargin(l)  {
+    if (l._scoreDetails?.profitMarginPct) return l._scoreDetails.profitMarginPct
+    const rev = getRevenue(l); const profit = getProfit(l)
+    return rev > 0 ? Math.round((profit / rev) * 100) : null
+  }
+
+  const withData = filtered.filter(l => getRevenue(l) > 0 || getProfit(l) > 0)
+  const best  = withData.length ? [...withData].sort((a, b) => getProfit(b) - getProfit(a))[0] : null
+  const worst = withData.length ? [...withData].sort((a, b) => (getMargin(a) ?? 999) - (getMargin(b) ?? 999))[0] : null
 
   return (
     <div style={{ padding: '0 28px 28px' }}>
@@ -422,14 +465,14 @@ function CompletedProjectsTab({ rows }) {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
           <HighlightCard
             label="Best Performer" client={best.name} period={best.address || '—'}
-            amount={`+$${(best._scoreDetails?.estimatedProfit || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
-            margin={`${Math.round(best._scoreDetails?.profitMarginPct || 0)}% margin`}
+            amount={`+$${getProfit(best).toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+            margin={getMargin(best) != null ? `${getMargin(best)}% margin` : `$${getRevenue(best).toLocaleString(undefined, { maximumFractionDigits: 0 })} revenue`}
             positive
           />
           <HighlightCard
             label="Lowest Margin" client={worst.name} period={worst.address || '—'}
-            amount={`+$${(worst._scoreDetails?.estimatedProfit || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
-            margin={`${Math.round(worst._scoreDetails?.profitMarginPct || 0)}% margin`}
+            amount={`+$${getProfit(worst).toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+            margin={getMargin(worst) != null ? `${getMargin(worst)}% margin` : `$${getRevenue(worst).toLocaleString(undefined, { maximumFractionDigits: 0 })} revenue`}
           />
         </div>
       )}
@@ -505,6 +548,8 @@ export default function Projects() {
   const [tab, setTab] = useState('current')
   const [showScorer, setShowScorer] = useState(false)
   const [showPortfolio, setShowPortfolio] = useState(false)
+  const [selectedProject, setSelectedProject] = useState(null)
+  const [scorerProject, setScorerProject] = useState(null)
   const fileRef = useRef()
 
   useEffect(() => {
@@ -526,36 +571,80 @@ export default function Projects() {
     setLoading(false)
   }
 
-  async function handleCSVImport(e) {
+  async function handleImport(e) {
     const file = e.target.files?.[0]
     if (!file) return
     e.target.value = ''
-    const text = await file.text()
-    const lines = text.trim().split('\n')
-    if (lines.length < 2) return
-    const headers = lines[0].split(',').map(h => h.trim())
-    const rows = []
-    for (let i = 1; i < lines.length; i++) {
-      const values = lines[i].split(',').map(v => v.trim().replace(/^"|"$/g, ''))
-      const row = {}
-      headers.forEach((h, idx) => { row[h] = values[idx] || '' })
-      if (row.name) rows.push({
-        name: row.name, job_type: row.job_type || 'Both',
-        square_footage: row.square_footage ? parseInt(row.square_footage) : null,
-        density: row.density || 'Medium',
-        item_quality_score: row.item_quality_score ? parseInt(row.item_quality_score) : null,
-        zip_code: row.zip_code || null, address: row.address || null,
-        notes: row.notes || null, status: 'Project Completed',
-      })
+
+    let jsonRows = []
+    const isXlsx = file.name.match(/\.(xlsx|xls)$/i)
+
+    try {
+      if (isXlsx) {
+        const buf = await file.arrayBuffer()
+        const wb = XLSX.read(buf)
+        const ws = wb.Sheets[wb.SheetNames[0]]
+        jsonRows = XLSX.utils.sheet_to_json(ws, { defval: '' })
+      } else {
+        const text = await file.text()
+        const lines = text.trim().split('\n')
+        if (lines.length < 2) { alert('CSV appears empty.'); return }
+        const headers = lines[0].split(',').map(h => h.trim())
+        for (let i = 1; i < lines.length; i++) {
+          const values = lines[i].split(',').map(v => v.trim().replace(/^"|"$/g, ''))
+          const row = {}
+          headers.forEach((h, idx) => { row[h] = values[idx] || '' })
+          jsonRows.push(row)
+        }
+      }
+    } catch (err) {
+      alert(`Failed to read file: ${err.message}`)
+      return
     }
-    if (rows.length > 0) {
-      await supabase.from('leads').insert(rows.map(r => ({ ...r, organization_id: organizationId })))
+
+    if (jsonRows.length === 0) {
+      alert('No rows found in file.')
+      return
+    }
+
+    // Normalise column names (lowercase, trim) to be flexible
+    const normalised = jsonRows.map(row => {
+      const n = {}
+      Object.entries(row).forEach(([k, v]) => { n[k.toLowerCase().trim().replace(/\s+/g, '_')] = v })
+      return n
+    })
+
+    const rows = normalised
+      .filter(row => row.name || row.client_name || row.property_name || row.address)
+      .map(row => ({
+        name: String(row.name || row.client_name || row.property_name || row.address || 'Untitled'),
+        job_type: row.job_type || row.type || 'Both',
+        square_footage: row.square_footage || row.sqft ? parseInt(row.square_footage || row.sqft) : null,
+        density: row.density || 'Medium',
+        item_quality_score: row.item_quality_score || row.quality ? parseInt(row.item_quality_score || row.quality) : null,
+        zip_code: row.zip_code || row.zip ? String(row.zip_code || row.zip) : null,
+        address: row.address || null,
+        notes: row.notes || row.note || null,
+        status: 'Won',
+      }))
+
+    if (rows.length === 0) {
+      const cols = Object.keys(jsonRows[0] || {}).join(', ')
+      alert(`No importable rows found.\n\nColumns detected: ${cols}\n\nExpected a column named: name, client_name, property_name, or address.`)
+      return
+    }
+
+    const { error } = await supabase.from('leads').insert(rows.map(r => ({ ...r, organization_id: organizationId })))
+    if (error) {
+      alert(`Import failed: ${error.message}`)
+    } else {
+      alert(`Imported ${rows.length} project${rows.length !== 1 ? 's' : ''} successfully.`)
       fetchLeads()
     }
   }
 
-  const currentLeads = leads.filter(l => l.status !== 'Project Completed')
-  const completedLeads = leads.filter(l => l.status === 'Project Completed')
+  const completedLeads = leads.filter(l => l.status === 'Won' || l.status === 'Project Completed')
+  const currentLeads = leads.filter(l => l.status !== 'Won' && l.status !== 'Project Completed')
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
@@ -574,9 +663,9 @@ export default function Projects() {
             <Download size={13} strokeWidth={1.8} /> CSV Template
           </button>
           <button onClick={() => fileRef.current?.click()} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 13px', borderRadius: 9, border: '1px solid var(--line)', background: 'var(--panel)', color: 'var(--ink-2)', fontSize: 12.5, fontWeight: 500, cursor: 'pointer', boxShadow: 'var(--shadow-1)', fontFamily: 'inherit' }}>
-            <Upload size={13} strokeWidth={1.8} /> Import CSV
+            <Upload size={13} strokeWidth={1.8} /> Import CSV / XLSX
           </button>
-          <input ref={fileRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={handleCSVImport} />
+          <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" style={{ display: 'none' }} onChange={handleImport} />
           <button id="projects-new-btn" onClick={() => setShowScorer(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 13px 7px 10px', borderRadius: 10, border: 'none', background: 'var(--accent)', color: 'white', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
             <Plus size={13} strokeWidth={2.5} /> New Project
           </button>
@@ -592,13 +681,31 @@ export default function Projects() {
       {loading ? (
         <div style={{ textAlign: 'center', color: 'var(--ink-4)', fontSize: 13, marginTop: 60 }}>Loading…</div>
       ) : tab === 'current' ? (
-        <CurrentProjectsTab rows={currentLeads} onOpen={() => {}} onBuildDeck={() => setShowPortfolio(true)} />
+        <CurrentProjectsTab rows={currentLeads} onOpen={setSelectedProject} onBuildDeck={() => setShowPortfolio(true)} />
       ) : (
         <CompletedProjectsTab rows={completedLeads} />
       )}
 
-      {showScorer && <DealScorerModal onClose={() => setShowScorer(false)} onSaved={fetchLeads} />}
+      {(showScorer || scorerProject) && (
+        <DealScorerModal
+          lead={scorerProject}
+          onClose={() => { setShowScorer(false); setScorerProject(null) }}
+          onSaved={fetchLeads}
+        />
+      )}
       <PortfolioBuilderModal open={showPortfolio} onClose={() => setShowPortfolio(false)} />
+      {selectedProject && (
+        <ProjectDrawer
+          project={selectedProject}
+          onClose={() => setSelectedProject(null)}
+          onOpenScorer={p => { setSelectedProject(null); setScorerProject(p); }}
+          onDelete={async id => {
+            await supabase.from('leads').delete().eq('id', id)
+            setLeads(prev => prev.filter(l => l.id !== id))
+            setSelectedProject(null)
+          }}
+        />
+      )}
     </div>
   )
 }

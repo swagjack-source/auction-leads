@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
-import { Search, Users, Trophy, Star, TrendingUp, Filter, ArrowUpDown, ChevronDown } from 'lucide-react'
+import { Search, Users, Trophy, Star, TrendingUp, Filter, ArrowUpDown, ChevronDown, Upload } from 'lucide-react'
+import * as XLSX from 'xlsx'
 import StageColumn from '../components/Pipeline/StageColumn'
 import LeadModal from '../components/Pipeline/LeadModal'
 import LeadDrawer from '../components/Pipeline/LeadDrawer'
@@ -22,7 +23,7 @@ const OUTCOME_FILTERS = [
   { key: 'Backlog', label: 'Backlog', color: 'var(--ink-3)',soft: 'var(--hover)'     },
 ]
 
-function BoardHeader({ jobFilter, setJobFilter, outcomeFilter, setOutcomeFilter, view, setView }) {
+function BoardHeader({ jobFilter, setJobFilter, outcomeFilter, setOutcomeFilter, view, setView, onImport, fileRef }) {
   const { members } = useTeam()
   return (
     <div style={{
@@ -93,6 +94,8 @@ function BoardHeader({ jobFilter, setJobFilter, outcomeFilter, setOutcomeFilter,
       <button style={ctrlBtn}><Filter size={13} strokeWidth={1.8} /> Filter</button>
       <button style={ctrlBtn}><ArrowUpDown size={13} strokeWidth={1.8} /> Sort</button>
       <button style={ctrlBtn}>Group: Stage <ChevronDown size={12} strokeWidth={1.8} /></button>
+      <button onClick={() => fileRef?.current?.click()} style={ctrlBtn}><Upload size={13} strokeWidth={1.8} /> Import</button>
+      <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }} onChange={onImport} />
 
       {/* Team avatars */}
       <div style={{ display: 'flex', marginLeft: 4 }}>
@@ -301,6 +304,7 @@ export default function Pipeline() {
   const [hoverCol, setHoverCol] = useState(null)
   const hoverColRef = useRef(null)
   const boardRef = useRef(null)
+  const importFileRef = useRef(null)
 
   useEffect(() => {
     const el = boardRef.current
@@ -380,6 +384,74 @@ export default function Pipeline() {
     }
     setSelectedLead(null)
     setIsNewLead(false)
+  }
+
+  async function handleImportLeads(e) {
+    const file = e.target.files?.[0]; if (!file) return; e.target.value = ''
+    try {
+      let jsonRows = []
+      if (file.name.match(/\.(xlsx|xls)$/i)) {
+        const wb = XLSX.read(await file.arrayBuffer())
+        const ws = wb.Sheets[wb.SheetNames[0]]
+        jsonRows = XLSX.utils.sheet_to_json(ws, { defval: '' })
+      } else {
+        const lines = (await file.text()).trim().split('\n')
+        const headers = lines[0].split(',').map(h => h.trim())
+        jsonRows = lines.slice(1).map(line => {
+          const vals = line.split(',').map(v => v.trim().replace(/^"|"$/g, ''))
+          const row = {}; headers.forEach((h, i) => row[h] = vals[i] || ''); return row
+        })
+      }
+
+      // Normalise keys
+      const rows = jsonRows.map(r => {
+        const n = {}
+        Object.entries(r).forEach(([k, v]) => { n[k.toLowerCase().trim().replace(/\s+/g, '_')] = String(v).trim() })
+        return n
+      }).filter(r => r.name || r.client || r.full_name)
+
+      if (!rows.length) { alert('No importable rows found. Expected a "Name" column.'); return }
+
+      const STATUS_MAP = {
+        'new lead': 'New Lead', 'contacted': 'Contacted', 'in talks': 'In Talks',
+        'consult scheduled': 'Consult Scheduled', 'consult completed': 'Consult Completed',
+        'estimate sent': 'Estimate Sent', 'project accepted': 'Project Accepted',
+        'project scheduled': 'Project Scheduled', 'won': 'Won', 'lost': 'Lost',
+      }
+      const VALID_STATUSES = new Set(Object.values(STATUS_MAP))
+
+      function mapJobType(raw) {
+        const s = String(raw || '').toLowerCase()
+        const hasAuction = s.includes('auction')
+        const hasClean = s.includes('clean')
+        if (hasAuction && hasClean) return 'Both'
+        if (hasAuction) return 'Auction'
+        if (hasClean) return 'Clean Out'
+        return null
+      }
+
+      const toInsert = rows.map(r => {
+        const rawStatus = String(r.status || '').trim()
+        const mappedStatus = STATUS_MAP[rawStatus.toLowerCase()] || (VALID_STATUSES.has(rawStatus) ? rawStatus : 'New Lead')
+        return {
+          organization_id: organizationId,
+          name:    r.name || r.client || r.full_name,
+          phone:   r.phone || r.phone_number || r.cell || '',
+          email:   r.email || r.email_address || '',
+          address: r.address || '',
+          notes:   r.notes || r.what_they_need || r.description || '',
+          status:  mappedStatus,
+          job_type: mapJobType(r.job_type || r.type || r.services) || undefined,
+        }
+      })
+
+      const { error } = await supabase.from('leads').insert(toInsert)
+      if (error) { alert(`Import failed: ${error.message}`); return }
+      alert(`Imported ${toInsert.length} lead${toInsert.length !== 1 ? 's' : ''} successfully.`)
+      fetchLeads()
+    } catch (err) {
+      alert(`Failed to read file: ${err.message}`)
+    }
   }
 
   function openNewLead() {
@@ -480,6 +552,7 @@ export default function Pipeline() {
         jobFilter={jobFilter} setJobFilter={setJobFilter}
         outcomeFilter={outcomeFilter} setOutcomeFilter={setOutcomeFilter}
         view={view} setView={setView}
+        onImport={handleImportLeads} fileRef={importFileRef}
       />
 
       {/* View area */}
@@ -543,6 +616,11 @@ export default function Pipeline() {
           onChecklistChange={(id, checklist) =>
             setLeads(ls => ls.map(l => l.id === id ? { ...l, checklist } : l))
           }
+          onDelete={async id => {
+            await supabase.from('leads').delete().eq('id', id)
+            setLeads(ls => ls.filter(l => l.id !== id))
+            setDrawerLead(null)
+          }}
         />
       )}
 

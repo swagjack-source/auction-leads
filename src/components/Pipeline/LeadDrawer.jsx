@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { X, MapPin, Phone, Clock, CheckSquare, Square, ChevronDown, Calendar, FileText, CheckCircle, Pencil, Calculator, Trophy, RotateCcw } from 'lucide-react'
+import { X, MapPin, Phone, Clock, CheckSquare, Square, ChevronDown, Calendar, FileText, CheckCircle, Pencil, Calculator, Trophy, RotateCcw, Trash2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { getScoreColor, getScoreLabel } from '../../lib/scoring'
 import { supabase } from '../../lib/supabase'
@@ -61,16 +61,16 @@ function SectionTitle({ children }) {
   )
 }
 
-export default function LeadDrawer({ lead, onClose, onEdit, onMoveStatus, onChecklistChange }) {
+export default function LeadDrawer({ lead, onClose, onEdit, onMoveStatus, onChecklistChange, onDelete }) {
   const navigate = useNavigate()
   const [checklist, setChecklist] = useState(() => {
-
     if (Array.isArray(lead?.checklist) && lead.checklist.length > 0) return lead.checklist
     return DEFAULT_CHECKLIST.map(item => ({ label: item, done: false }))
   })
   const [showEstimateModal, setShowEstimateModal] = useState(false)
   const [showScheduleModal, setShowScheduleModal] = useState(false)
   const [showStageMenu, setShowStageMenu] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const stageMenuRef = useRef(null)
 
   useEffect(() => {
@@ -568,7 +568,20 @@ export default function LeadDrawer({ lead, onClose, onEdit, onMoveStatus, onChec
           display: 'flex', gap: 8, flexShrink: 0,
           background: 'var(--panel)',
         }}>
-          {renderFooter()}
+          {confirmDelete ? (
+            <>
+              <span style={{ fontSize: 12.5, color: 'var(--ink-3)', alignSelf: 'center', flex: 1 }}>Delete this lead?</span>
+              <button onClick={() => setConfirmDelete(false)} style={{ padding: '8px 14px', borderRadius: 9, border: '1px solid var(--line)', background: 'var(--panel)', color: 'var(--ink-2)', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
+              <button onClick={() => onDelete?.(lead.id)} style={{ padding: '8px 14px', borderRadius: 9, border: 'none', background: '#ef4444', color: 'white', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Delete</button>
+            </>
+          ) : (
+            <>
+              <button onClick={() => setConfirmDelete(true)} title="Delete lead" style={{ padding: '8px 10px', borderRadius: 9, border: '1px solid var(--line)', background: 'var(--panel)', color: '#ef4444', fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', flexShrink: 0, fontFamily: 'inherit' }}>
+                <Trash2 size={14} strokeWidth={1.8} />
+              </button>
+              {renderFooter()}
+            </>
+          )}
         </div>
       </aside>
 
