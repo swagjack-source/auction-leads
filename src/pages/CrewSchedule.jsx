@@ -232,30 +232,31 @@ export default function CrewSchedule() {
 
   async function fetchAll() {
     setLoading(true)
-    const [pRes, eRes, etRes, paRes] = await Promise.all([
-      supabase.from('leads').select('*').in('status',['Project Accepted','Project Scheduled','Won']).order('start_date',{ascending:true,nullsFirst:false}),
-      supabase.from('employees').select('*').eq('active',true).order('name'),
-      supabase.from('employee_project_types').select('employee_id, project_type_id, project_types(name)'),
-      supabase.from('project_assignments').select('lead_id, employee_id').catch(()=>({data:[]})),
-    ])
-    setProjects(pRes.data||[])
-    setEmployees(eRes.data||[])
-    const em = {}
-    for(const r of (etRes.data||[])){
-      if(!em[r.employee_id]) em[r.employee_id]=[]
-      em[r.employee_id].push({id:r.project_type_id,name:r.project_types?.name})
+    try {
+      const [pRes, eRes, etRes, paRes] = await Promise.all([
+        supabase.from('leads').select('*').in('status',['Project Accepted','Project Scheduled','Won']).order('start_date',{ascending:true,nullsFirst:false}),
+        supabase.from('employees').select('*').eq('active',true).order('name'),
+        supabase.from('employee_project_types').select('employee_id, project_type_id, project_types(name)'),
+        supabase.from('project_assignments').select('lead_id, employee_id'),
+      ])
+      setProjects(pRes.data||[])
+      setEmployees(eRes.data||[])
+      const em = {}
+      for(const r of (etRes.data||[])){
+        if(!em[r.employee_id]) em[r.employee_id]=[]
+        em[r.employee_id].push({id:r.project_type_id,name:r.project_types?.name})
+      }
+      setEmpTypes(em)
+      const am = {}
+      for(const r of (paRes.data||[])){
+        if(!am[r.lead_id]) am[r.lead_id]=[]
+        am[r.lead_id].push(r.employee_id)
+      }
+      const local = JSON.parse(localStorage.getItem('crew_assignments')||'{}')
+      setAssignments({...local,...am})
+    } finally {
+      setLoading(false)
     }
-    setEmpTypes(em)
-    // Load assignments from DB or local
-    const am = {}
-    for(const r of (paRes.data||[])){
-      if(!am[r.lead_id]) am[r.lead_id]=[]
-      am[r.lead_id].push(r.employee_id)
-    }
-    // Merge with localStorage fallback
-    const local = JSON.parse(localStorage.getItem('crew_assignments')||'{}')
-    setAssignments({...local,...am})
-    setLoading(false)
   }
 
   const weekDates = getWeekDates(weekAnchor)
