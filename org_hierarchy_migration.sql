@@ -40,34 +40,69 @@ ALTER TABLE org_members ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "org_members: org members can read their org"
   ON org_members FOR SELECT
-  USING (organization_id = ANY(user_organization_ids()));
+  USING (
+    organization_id IN (
+      SELECT organization_id FROM org_members
+      WHERE user_id = auth.uid()
+    )
+  );
 
 CREATE POLICY "org_members: admins can insert"
   ON org_members FOR INSERT
-  WITH CHECK (organization_id = ANY(user_organization_ids()));
+  WITH CHECK (
+    organization_id IN (
+      SELECT organization_id FROM org_members
+      WHERE user_id = auth.uid()
+    )
+  );
 
 CREATE POLICY "org_members: admins can update"
   ON org_members FOR UPDATE
-  USING (organization_id = ANY(user_organization_ids()));
+  USING (
+    organization_id IN (
+      SELECT organization_id FROM org_members
+      WHERE user_id = auth.uid()
+    )
+  );
 
 CREATE POLICY "org_members: admins can delete"
   ON org_members FOR DELETE
-  USING (organization_id = ANY(user_organization_ids()));
+  USING (
+    organization_id IN (
+      SELECT organization_id FROM org_members
+      WHERE user_id = auth.uid()
+    )
+  );
 
 -- 4. RLS policies for org_invites
 ALTER TABLE org_invites ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "org_invites: org members can read"
   ON org_invites FOR SELECT
-  USING (organization_id = ANY(user_organization_ids()));
+  USING (
+    organization_id IN (
+      SELECT organization_id FROM org_members
+      WHERE user_id = auth.uid()
+    )
+  );
 
 CREATE POLICY "org_invites: org members can create"
   ON org_invites FOR INSERT
-  WITH CHECK (organization_id = ANY(user_organization_ids()));
+  WITH CHECK (
+    organization_id IN (
+      SELECT organization_id FROM org_members
+      WHERE user_id = auth.uid()
+    )
+  );
 
 CREATE POLICY "org_invites: org members can delete"
   ON org_invites FOR DELETE
-  USING (organization_id = ANY(user_organization_ids()));
+  USING (
+    organization_id IN (
+      SELECT organization_id FROM org_members
+      WHERE user_id = auth.uid()
+    )
+  );
 
 -- 5. project_assignments table (for Crew Schedule page)
 CREATE TABLE IF NOT EXISTS project_assignments (
@@ -83,5 +118,15 @@ ALTER TABLE project_assignments ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "project_assignments: org members can read/write"
   ON project_assignments FOR ALL
-  USING (organization_id = ANY(user_organization_ids()))
-  WITH CHECK (organization_id = ANY(user_organization_ids()));
+  USING (
+    organization_id IN (
+      SELECT organization_id FROM org_members
+      WHERE user_id = auth.uid()
+    )
+  )
+  WITH CHECK (
+    organization_id IN (
+      SELECT organization_id FROM org_members
+      WHERE user_id = auth.uid()
+    )
+  );
