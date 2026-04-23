@@ -13,7 +13,7 @@ export const OUTCOME_STAGES = ['Won', 'Lost', 'Backlog']
 
 export const PIPELINE_STAGES = [...ACTIVE_STAGES, ...OUTCOME_STAGES]
 
-export const JOB_TYPES = ['Clean Out', 'Auction', 'Both']
+export const JOB_TYPES = ['Clean Out', 'Auction', 'Both', 'Move', 'In-person Estate Sale']
 
 export const DENSITY_OPTIONS = ['Low', 'Medium', 'High']
 

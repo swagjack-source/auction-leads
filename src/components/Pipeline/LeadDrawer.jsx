@@ -93,10 +93,15 @@ export default function LeadDrawer({ lead, onClose, onEdit, onMoveStatus, onChec
   const estValue   = lead._scoreDetails?.recommendedBid
 
   async function toggleCheck(i) {
+    const item = checklist[i]
     const updated = checklist.map((x, idx) => idx === i ? { ...x, done: !x.done } : x)
     setChecklist(updated)
     await supabase.from('leads').update({ checklist: updated }).eq('id', lead.id)
     onChecklistChange?.(lead.id, updated)
+    // Auto-advance status when "Initial call logged" is checked
+    if (!item.done && item.label === 'Initial call logged' && lead.status === 'New Lead') {
+      onMoveStatus?.(lead, 'Contacted')
+    }
   }
 
   const mapsUrl = lead.address
@@ -469,22 +474,39 @@ export default function LeadDrawer({ lead, onClose, onEdit, onMoveStatus, onChec
             </div>
           </div>
 
-          {/* Activity */}
+          {/* Checklist — immediately below Contact */}
           <div style={{ marginBottom: 20 }}>
-            <SectionTitle>Activity</SectionTitle>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-              {[
-                { initials: 'MR', bg: 'linear-gradient(135deg,#A50050,#7A003A)', text: `Left voicemail for ${lead.name?.split(' ')[0] || 'client'}. Will follow up tomorrow.`, when: 'Today · 9:42 AM' },
-                { initials: 'DK', bg: 'linear-gradient(135deg,#0F766E,#065F46)',  text: 'Added to pipeline from referral source.', when: 'Yesterday · 4:15 PM' },
-                { initials: 'MR', bg: 'linear-gradient(135deg,#A50050,#7A003A)', text: 'Initial intake form received.', when: '2 days ago' },
-              ].map((item, i) => (
-                <div key={i} style={{ display: 'flex', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--line-2)' }}>
-                  <div style={{ width: 26, height: 26, borderRadius: '50%', background: item.bg, color: 'white', display: 'grid', placeItems: 'center', fontSize: 9, fontWeight: 700, flexShrink: 0, marginTop: 1 }}>{item.initials}</div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 12.5, color: 'var(--ink-1)', lineHeight: 1.4 }}>{item.text}</div>
-                    <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 3 }}>{item.when}</div>
-                  </div>
-                </div>
+            <SectionTitle>Checklist</SectionTitle>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+              {checklist.map((item, i) => (
+                <button
+                  key={i}
+                  onClick={() => toggleCheck(i)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 9,
+                    padding: '7px 10px', borderRadius: 8,
+                    border: '1px solid var(--line)',
+                    background: item.done ? 'var(--win-soft)' : 'var(--bg)',
+                    cursor: 'pointer', textAlign: 'left',
+                    transition: 'background 120ms',
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  {item.done
+                    ? <CheckSquare size={14} strokeWidth={1.8} color="var(--win)" />
+                    : <Square size={14} strokeWidth={1.8} color="var(--ink-4)" />
+                  }
+                  <span style={{
+                    fontSize: 12.5, color: item.done ? 'var(--win)' : 'var(--ink-2)',
+                    fontWeight: item.done ? 500 : 400,
+                    textDecoration: item.done ? 'line-through' : 'none',
+                    opacity: item.done ? 0.75 : 1,
+                    flex: 1,
+                  }}>{item.label}</span>
+                  {item.label === 'Initial call logged' && !item.done && (
+                    <span style={{ fontSize: 9.5, color: 'var(--ink-4)', fontWeight: 500, whiteSpace: 'nowrap' }}>→ Contacted</span>
+                  )}
+                </button>
               ))}
             </div>
           </div>
@@ -527,38 +549,6 @@ export default function LeadDrawer({ lead, onClose, onEdit, onMoveStatus, onChec
             </div>
           )}
 
-          {/* Checklist */}
-          <div style={{ marginBottom: 20 }}>
-            <SectionTitle>Checklist</SectionTitle>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-              {checklist.map((item, i) => (
-                <button
-                  key={i}
-                  onClick={() => toggleCheck(i)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 9,
-                    padding: '7px 10px', borderRadius: 8,
-                    border: '1px solid var(--line)',
-                    background: item.done ? 'var(--win-soft)' : 'var(--bg)',
-                    cursor: 'pointer', textAlign: 'left',
-                    transition: 'background 120ms',
-                    fontFamily: 'inherit',
-                  }}
-                >
-                  {item.done
-                    ? <CheckSquare size={14} strokeWidth={1.8} color="var(--win)" />
-                    : <Square size={14} strokeWidth={1.8} color="var(--ink-4)" />
-                  }
-                  <span style={{
-                    fontSize: 12.5, color: item.done ? 'var(--win)' : 'var(--ink-2)',
-                    fontWeight: item.done ? 500 : 400,
-                    textDecoration: item.done ? 'line-through' : 'none',
-                    opacity: item.done ? 0.75 : 1,
-                  }}>{item.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
 
         {/* Footer actions */}

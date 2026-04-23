@@ -5,13 +5,15 @@ import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../lib/AuthContext'
 
 const JOB_TYPE_OPTIONS = [
-  { id: 'Clean Out', title: 'Clean Out Only',      sub: 'Labor-focused, no auction' },
-  { id: 'Auction',   title: 'Auction Only',        sub: 'Sell items, no cleanout' },
-  { id: 'Both',      title: 'Clean Out + Auction', sub: 'Full-service premium job' },
+  { id: 'Clean Out',             title: 'Clean Out Only',        sub: 'Labor-focused, no auction' },
+  { id: 'Auction',               title: 'Auction Only',          sub: 'Sell items, no cleanout' },
+  { id: 'Both',                  title: 'Clean Out + Auction',   sub: 'Full-service premium job' },
+  { id: 'Move',                  title: 'Move',                  sub: 'Relocation / moving service' },
+  { id: 'In-person Estate Sale', title: 'In-person Estate Sale', sub: 'On-site sale with customers' },
 ]
 
 const DENSITY_MULT = { Low: 0.7, Medium: 1.0, High: 1.45 }
-const JOB_MULT     = { 'Clean Out': 0.85, Auction: 1.1, Both: 1.3 }
+const JOB_MULT     = { 'Clean Out': 0.85, Auction: 1.1, Both: 1.3, 'Move': 0.9, 'In-person Estate Sale': 1.05 }
 
 // ── Density segmented control ──────────────────────────────────
 
@@ -274,7 +276,12 @@ export default function DealScorerModal({ onClose, onSaved }) {
   const [zipCode, setZipCode]         = useState('')
   const [result, setResult]           = useState(null)
   const [saving, setSaving]           = useState(false)
-  const [added, setAdded]             = useState(false)
+  const [tab, setTab]                 = useState('scorer')
+  // Contact info for the new lead
+  const [leadName, setLeadName]       = useState('')
+  const [leadAddress, setLeadAddress] = useState('')
+  const [leadPhone, setLeadPhone]     = useState('')
+  const [leadEmail, setLeadEmail]     = useState('')
   const hasCalculated = useRef(false)
 
   // Live recalc after first Calculate click
@@ -303,15 +310,22 @@ export default function DealScorerModal({ onClose, onSaved }) {
     if (!result) return
     setSaving(true)
     await supabase.from('leads').insert({
-      name: 'New Lead', status: 'New Lead',
-      square_footage: Number(sqft), density,
-      item_quality_score: Number(itemQuality), job_type: jobType,
-      zip_code: zipCode || null, deal_score: result.dealScore,
-      organization_id: organizationId,
+      name:               leadName.trim() || 'New Lead',
+      status:             'New Lead',
+      square_footage:     Number(sqft),
+      density,
+      item_quality_score: Number(itemQuality),
+      job_type:           jobType,
+      zip_code:           zipCode || null,
+      address:            leadAddress || null,
+      phone:              leadPhone || null,
+      email:              leadEmail || null,
+      deal_score:         result.dealScore,
+      organization_id:    organizationId,
     })
     setSaving(false)
-    setAdded(true)
     onSaved?.()
+    onClose()
   }
 
   const scoreColor = result ? getScoreColor(result.dealScore) : 'var(--ink-4)'
@@ -332,21 +346,70 @@ export default function DealScorerModal({ onClose, onSaved }) {
       <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 18, boxShadow: 'var(--shadow-lg)', width: '100%', maxWidth: 960, maxHeight: '92vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
 
         {/* Header */}
-        <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-          <div style={{ width: 28, height: 28, borderRadius: 8, background: 'var(--accent-soft)', color: 'var(--accent)', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
-            <Sparkles size={14} strokeWidth={1.8} />
+        <div style={{ padding: '14px 20px 0', borderBottom: '1px solid var(--line)', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+            <div style={{ width: 28, height: 28, borderRadius: 8, background: 'var(--accent-soft)', color: 'var(--accent)', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+              <Sparkles size={14} strokeWidth={1.8} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--ink-1)' }}>New Project — Deal Scorer</div>
+              <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>Estimate labor, costs, and deal quality</div>
+            </div>
+            <button onClick={onClose} style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid var(--line)', background: 'transparent', cursor: 'pointer', display: 'grid', placeItems: 'center', color: 'var(--ink-3)' }}>
+              <X size={15} strokeWidth={1.8} />
+            </button>
           </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--ink-1)' }}>New Project — Deal Scorer</div>
-            <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>Estimate labor, costs, and deal quality</div>
+          {/* Tabs */}
+          <div style={{ display: 'flex', gap: 0 }}>
+            {[{ id: 'scorer', label: 'Deal Scorer' }, { id: 'contact', label: 'Contact Info' }].map(t => (
+              <button key={t.id} onClick={() => setTab(t.id)} style={{
+                padding: '7px 16px', border: 'none', background: 'none', cursor: 'pointer',
+                fontSize: 12.5, fontWeight: 600, fontFamily: 'inherit',
+                color: tab === t.id ? 'var(--accent)' : 'var(--ink-3)',
+                borderBottom: tab === t.id ? '2px solid var(--accent)' : '2px solid transparent',
+                marginBottom: -1,
+              }}>{t.label}{t.id === 'contact' && (leadName || leadAddress || leadPhone) ? ' ●' : ''}</button>
+            ))}
           </div>
-          <button onClick={onClose} style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid var(--line)', background: 'transparent', cursor: 'pointer', display: 'grid', placeItems: 'center', color: 'var(--ink-3)' }}>
-            <X size={15} strokeWidth={1.8} />
-          </button>
         </div>
 
+        {/* Contact Info Tab */}
+        {tab === 'contact' && (
+          <div style={{ flex: 1, overflowY: 'auto', padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ fontSize: 12.5, color: 'var(--ink-3)', marginBottom: 4 }}>This info will be saved with the lead when you add it to the pipeline.</div>
+            {[
+              { label: 'Lead Name', value: leadName, set: setLeadName, placeholder: 'e.g. Jane Smith', type: 'text' },
+              { label: 'Address', value: leadAddress, set: setLeadAddress, placeholder: 'e.g. 123 Main St, Denver CO', type: 'text' },
+              { label: 'Phone', value: leadPhone, set: setLeadPhone, placeholder: 'e.g. 720-555-0100', type: 'tel' },
+              { label: 'Email', value: leadEmail, set: setLeadEmail, placeholder: 'e.g. jane@example.com', type: 'email' },
+            ].map(({ label, value, set, placeholder, type }) => (
+              <div key={label}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>{label}</div>
+                <input type={type} value={value} onChange={e => set(e.target.value)} placeholder={placeholder}
+                  style={{ width: '100%', padding: '9px 12px', fontSize: 13, border: '1px solid var(--line)', borderRadius: 10, background: 'var(--bg)', outline: 'none', color: 'var(--ink-1)', fontFamily: 'inherit', boxSizing: 'border-box' }} />
+              </div>
+            ))}
+            {result && (
+              <button onClick={handleAddToPipeline} disabled={saving} style={{
+                marginTop: 8, padding: '11px', borderRadius: 12, border: 'none',
+                background: 'var(--accent)', color: 'white',
+                fontWeight: 600, fontSize: 13, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                opacity: saving ? 0.7 : 1,
+              }}>
+                <Plus size={14} strokeWidth={2} /> {saving ? 'Adding…' : 'Add to Pipeline'}
+              </button>
+            )}
+            {!result && (
+              <div style={{ padding: '14px', borderRadius: 10, background: 'var(--line-2)', fontSize: 12.5, color: 'var(--ink-3)', textAlign: 'center' }}>
+                Run the Deal Scorer first to enable "Add to Pipeline"
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Body */}
-        <div style={{ flex: 1, overflow: 'hidden', display: 'flex', minHeight: 0 }}>
+        {tab === 'scorer' && <div style={{ flex: 1, overflow: 'hidden', display: 'flex', minHeight: 0 }}>
 
           {/* Left: Form */}
           <div style={{ width: 360, flexShrink: 0, overflowY: 'auto', padding: '16px 20px 20px', borderRight: '1px solid var(--line)', background: 'var(--panel)' }}>
@@ -479,30 +542,26 @@ export default function DealScorerModal({ onClose, onSaved }) {
 
                 {/* CTAs */}
                 <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-                  {added ? (
-                    <div style={{ flex: 1, padding: '11px 16px', borderRadius: 12, background: 'color-mix(in oklab, var(--win) 10%, var(--panel))', border: '1px solid color-mix(in oklab, var(--win) 30%, var(--line))', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--win)' }}>✓ Added to Pipeline</span>
-                      <button onClick={onClose} style={{ fontSize: 12, color: 'var(--ink-3)', background: 'none', border: 'none', cursor: 'pointer' }}>Close</button>
-                    </div>
-                  ) : (
-                    <button onClick={handleAddToPipeline} disabled={saving} style={{
-                      flex: 1, padding: '11px', borderRadius: 12, border: 'none',
-                      background: 'var(--accent)', color: 'white',
-                      fontWeight: 600, fontSize: 13, cursor: 'pointer',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                      opacity: saving ? 0.7 : 1,
-                    }}>
-                      <Plus size={14} strokeWidth={2} /> {saving ? 'Adding…' : 'Add to Pipeline'}
-                    </button>
-                  )}
-                  <button onClick={onClose} style={{ padding: '11px 20px', borderRadius: 12, border: '1px solid var(--line)', background: 'var(--panel)', fontWeight: 600, fontSize: 13, cursor: 'pointer', color: 'var(--ink-1)' }}>
+                  <button onClick={handleAddToPipeline} disabled={saving} style={{
+                    flex: 1, padding: '11px', borderRadius: 12, border: 'none',
+                    background: 'var(--accent)', color: 'white',
+                    fontWeight: 600, fontSize: 13, cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                    opacity: saving ? 0.7 : 1,
+                  }}>
+                    <Plus size={14} strokeWidth={2} /> {saving ? 'Adding…' : 'Add to Pipeline'}
+                  </button>
+                  <button onClick={() => setTab('contact')} style={{ padding: '11px 16px', borderRadius: 12, border: '1px solid var(--line)', background: 'var(--panel)', fontWeight: 600, fontSize: 13, cursor: 'pointer', color: 'var(--ink-2)', whiteSpace: 'nowrap' }}>
+                    + Contact Info
+                  </button>
+                  <button onClick={onClose} style={{ padding: '11px 16px', borderRadius: 12, border: '1px solid var(--line)', background: 'var(--panel)', fontWeight: 600, fontSize: 13, cursor: 'pointer', color: 'var(--ink-1)' }}>
                     Close
                   </button>
                 </div>
               </>
             )}
           </div>
-        </div>
+        </div>}
       </div>
     </div>
   )

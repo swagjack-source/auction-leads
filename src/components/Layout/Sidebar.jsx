@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { NavLink } from 'react-router-dom'
-import { Home, Columns3, FolderOpen, CalendarDays, BookUser, Users, BookOpen, Image, X, Search, FileText, LogOut, Gavel, Package, ReceiptText, Bookmark, Bell, Handshake } from 'lucide-react'
+import { Home, Columns3, FolderOpen, CalendarDays, BookUser, Users, BookOpen, Image, X, Search, FileText, LogOut, Gavel, Package, ReceiptText, Bookmark, Bell, Handshake, ClipboardList, ShieldCheck } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useTheme } from '../../lib/ThemeContext'
 import { useAuth } from '../../lib/AuthContext'
@@ -92,13 +92,15 @@ export default function Sidebar({ mobile, onClose }) {
     { to: '/calendar',  icon: CalendarDays, label: 'Calendar',      badge: calendarCount },
     { to: '/bdr',       icon: Handshake,    label: 'BDR'            },
     { to: '/contacts',  icon: BookUser,     label: 'Contacts'       },
-    { to: '/employees', icon: Users,        label: 'Employees'      },
+    { to: '/employees', icon: Users,         label: 'Employees'      },
+    { to: '/schedule',  icon: ClipboardList, label: 'Crew Schedule'  },
     { to: '/training',  icon: BookOpen,     label: 'Training'       },
     { to: '/library',   icon: Image,        label: 'Library'        },
     { to: '/expenses',  icon: ReceiptText,  label: 'Expenses'       },
     { to: '/inventory', icon: Package,      label: 'Inventory'      },
     { to: '/ctbids',    icon: Gavel,        label: 'CTBids'         },
     { to: '/activity',  icon: Bell,         label: 'Activity'       },
+    { to: '/team',      icon: ShieldCheck,  label: 'Team & Access'  },
   ]
 
   const quickLinks = [

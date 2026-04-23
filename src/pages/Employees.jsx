@@ -96,7 +96,7 @@ function EmployeeModal({ employee, projectTypes, onClose, onSave }) {
           </div>
 
           <div>
-            <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-3)', display: 'block', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Project Types</label>
+            <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-3)', display: 'block', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Teams</label>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
               {projectTypes.map(pt => {
                 const on = assignments.includes(pt.id)
@@ -192,7 +192,7 @@ function EmployeeCard({ emp, types, onEdit, onToggle }) {
         )}
       </div>
 
-      {/* Project types */}
+      {/* Teams */}
       {types.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
           {types.map(t => (

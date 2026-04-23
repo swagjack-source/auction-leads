@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
-import { Search, Users, Trophy, Star, TrendingUp, Filter, ArrowUpDown, ChevronDown, Upload } from 'lucide-react'
+import { Search, X, Users, Trophy, Star, TrendingUp, ArrowUpDown, ChevronDown, Upload } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import StageColumn from '../components/Pipeline/StageColumn'
 import LeadModal from '../components/Pipeline/LeadModal'
@@ -23,7 +23,7 @@ const OUTCOME_FILTERS = [
   { key: 'Backlog', label: 'Backlog', color: 'var(--ink-3)',soft: 'var(--hover)'     },
 ]
 
-function BoardHeader({ jobFilter, setJobFilter, outcomeFilter, setOutcomeFilter, view, setView, onImport, fileRef, selectedMember, setSelectedMember, sortBy, setSortBy }) {
+function BoardHeader({ jobFilter, setJobFilter, outcomeFilter, setOutcomeFilter, view, setView, onImport, fileRef, selectedMember, setSelectedMember, sortBy, setSortBy, search, setSearch }) {
   const { members } = useTeam()
   const [showSort, setShowSort] = useState(false)
   const sortRef = useRef(null)
@@ -52,6 +52,24 @@ function BoardHeader({ jobFilter, setJobFilter, outcomeFilter, setOutcomeFilter,
       flexShrink: 0,
       flexWrap: 'wrap',
     }}>
+      {/* Search */}
+      <div style={{ position: 'relative', flexShrink: 0 }}>
+        <Search size={13} style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-4)', pointerEvents: 'none' }} />
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search leads…"
+          style={{ paddingLeft: 28, paddingRight: search ? 26 : 10, paddingTop: 6, paddingBottom: 6, fontSize: 12.5, border: '1px solid var(--line)', borderRadius: 10, background: 'var(--bg)', color: 'var(--ink-1)', outline: 'none', fontFamily: 'inherit', width: 180 }}
+        />
+        {search && (
+          <button onClick={() => setSearch('')} style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-4)', padding: 0, display: 'flex' }}>
+            <X size={12} />
+          </button>
+        )}
+      </div>
+
+      <div style={{ width: 1, height: 18, background: 'var(--line)' }} />
+
       {/* View switcher */}
       <div style={{
         display: 'inline-flex',
@@ -604,6 +622,7 @@ export default function Pipeline() {
         onImport={handleImportLeads} fileRef={importFileRef}
         selectedMember={selectedMember} setSelectedMember={setSelectedMember}
         sortBy={sortBy} setSortBy={setSortBy}
+        search={search} setSearch={setSearch}
       />
 
       {/* View area */}

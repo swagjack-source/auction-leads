@@ -70,19 +70,20 @@ export function calculateDeal({ sqft, density, itemQuality, jobType, zipCode }) 
   const rawBid = range.min + (range.max - range.min) * densityMultiplier
 
   let recommendedBid = rawBid
-  if (jobType === 'Auction') recommendedBid = rawBid * AUCTION_DISCOUNT
-  if (jobType === 'Both') recommendedBid = rawBid * 1.15  // premium for full-service
+  if (jobType === 'Auction')               recommendedBid = rawBid * AUCTION_DISCOUNT
+  if (jobType === 'Both')                  recommendedBid = rawBid * 1.15
+  if (jobType === 'Move')                  recommendedBid = rawBid * 0.90
+  if (jobType === 'In-person Estate Sale') recommendedBid = rawBid * 1.05
 
   // Item quality affects auction revenue potential:
   // quality 1 = 0.75x, quality 5 ≈ 0.97x, quality 7 ≈ 1.08x, quality 10 = 1.25x
   const qualityFactor = 0.75 + (itemQuality - 1) * (0.5 / 9)
-  if (jobType === 'Auction') {
+  if (jobType === 'Auction' || jobType === 'In-person Estate Sale') {
     recommendedBid = recommendedBid * qualityFactor
   } else if (jobType === 'Both') {
-    // Auction portion (~half the value) is quality-sensitive
     recommendedBid = recommendedBid * (0.5 + qualityFactor * 0.5)
   }
-  // Clean Out: quality doesn't affect the service fee
+  // Clean Out / Move: quality doesn't affect the service fee
 
   recommendedBid = Math.round(recommendedBid / 100) * 100  // round to nearest $100
 
@@ -104,8 +105,8 @@ export function calculateDeal({ sqft, density, itemQuality, jobType, zipCode }) 
   // 4. Profit score: 0–10 based on margin percentage
   const profitScore = Math.min(Math.max((profitMarginPct / 40) * 10, 0), 10)
 
-  // 5. Job type bonus: Both = max upside
-  const jobTypeScore = { 'Clean Out': 6, 'Auction': 7, 'Both': 10 }[jobType]
+  // 5. Job type bonus
+  const jobTypeScore = { 'Clean Out': 6, 'Auction': 7, 'Both': 10, 'Move': 5, 'In-person Estate Sale': 8 }[jobType] ?? 6
 
   // Weights (must sum to 1.0)
   const WEIGHTS = {
@@ -154,9 +155,10 @@ export function estimateCrew(sqft, density, jobType) {
   if (!sqft || !density || !jobType) return 2
   const size = getSizeBucket(Number(sqft))
   let crew = { Small: 2, Medium: 3, Large: 5 }[size]
-  if (density === 'High')   crew += 1
-  if (jobType === 'Auction') crew += 1
-  if (jobType === 'Both')    crew += 1
+  if (density === 'High')                  crew += 1
+  if (jobType === 'Auction')               crew += 1
+  if (jobType === 'Both')                  crew += 1
+  if (jobType === 'In-person Estate Sale') crew += 1
   return crew
 }
 

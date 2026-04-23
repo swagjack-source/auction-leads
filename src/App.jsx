@@ -22,6 +22,8 @@ import Expenses from './pages/Expenses'
 import Inventory from './pages/Inventory'
 import CTBids from './pages/CTBids'
 import SavedViews from './pages/SavedViews'
+import CrewSchedule from './pages/CrewSchedule'
+import TeamSettings from './pages/TeamSettings'
 import Login from './pages/Login'
 import { TeamProvider } from './lib/TeamContext'
 import { ThemeProvider } from './lib/ThemeContext'
@@ -46,6 +48,8 @@ const PAGE_TITLES = {
   '/inventory':  'Inventory',
   '/ctbids':     'CTBids Analytics',
   '/saved':      'Saved Views',
+  '/schedule':   'Crew Schedule',
+  '/team':       'Team & Access',
 }
 
 function Topbar({ onMenuClick, isMobile, onStartTour }) {
@@ -223,6 +227,8 @@ export default function App() {
                     <Route path="/inventory" element={<PrivateRoute><Inventory /></PrivateRoute>} />
                     <Route path="/ctbids"    element={<PrivateRoute><CTBids /></PrivateRoute>} />
                     <Route path="/saved"     element={<PrivateRoute><SavedViews /></PrivateRoute>} />
+                    <Route path="/schedule" element={<PrivateRoute><CrewSchedule /></PrivateRoute>} />
+                    <Route path="/team"     element={<PrivateRoute><TeamSettings /></PrivateRoute>} />
                   </Route>
                 </Routes>
               </ErrorBoundary>
