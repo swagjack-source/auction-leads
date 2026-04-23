@@ -290,6 +290,20 @@ export default function History() {
     setProjects(ps => ps.filter(p => p.id !== id))
   }
 
+  function toggleSort(key) {
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortKey(key); setSortDir('desc') }
+  }
+
+  const sortedProjects = [...projects].sort((a, b) => {
+    const av = a[sortKey], bv = b[sortKey]
+    if (av == null && bv == null) return 0
+    if (av == null) return 1
+    if (bv == null) return -1
+    const cmp = typeof av === 'string' ? av.localeCompare(bv) : av - bv
+    return sortDir === 'asc' ? cmp : -cmp
+  })
+
   // Aggregate stats for header
   const withHours  = projects.filter(p => p.actual_labor_hours)
   const withBid    = projects.filter(p => p.actual_bid)
@@ -406,15 +420,19 @@ export default function History() {
             <thead>
               <tr>
                 {COL_DEFS.map(c => (
-                  <th key={c.key} style={{ textAlign: 'left', padding: '8px 12px', fontSize: 11, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.6px', borderBottom: '1px solid var(--line)' }}>
-                    {c.label}
+                  <th
+                    key={c.key}
+                    onClick={() => toggleSort(c.key)}
+                    style={{ textAlign: 'left', padding: '8px 12px', fontSize: 11, fontWeight: 700, color: sortKey === c.key ? 'var(--ink-1)' : 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.6px', borderBottom: '1px solid var(--line)', cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}
+                  >
+                    {c.label}{sortKey === c.key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''}
                   </th>
                 ))}
                 <th style={{ width: 40, borderBottom: '1px solid var(--line)' }} />
               </tr>
             </thead>
             <tbody>
-              {projects.map((p, i) => (
+              {sortedProjects.map((p, i) => (
                 <tr
                   key={p.id}
                   style={{ background: i % 2 === 0 ? 'transparent' : 'var(--stripe)', borderBottom: '1px solid var(--line)' }}
