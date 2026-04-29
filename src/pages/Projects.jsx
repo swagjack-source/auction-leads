@@ -1,5 +1,9 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { Download, Upload, Plus, Search, MapPin, TrendingUp, Star, X } from 'lucide-react'
+import {
+  Download, Upload, Plus, Search, X,
+  Calendar, Clock, AlertCircle, DollarSign,
+  CheckCircle, TrendingUp, BarChart2, Target,
+} from 'lucide-react'
 import * as XLSX from 'xlsx'
 import PortfolioBuilderModal from '../components/modals/PortfolioBuilderModal'
 import ProjectDrawer from '../components/modals/ProjectDrawer'
@@ -7,8 +11,11 @@ import { supabase } from '../lib/supabase'
 import { calculateDeal } from '../lib/scoring'
 import { useAuth } from '../lib/AuthContext'
 import DealScorerModal from '../components/Pipeline/DealScorerModal'
-import { MOCK_LEADS } from '../lib/mockData'
+import logger from '../lib/logger'
+import ErrorBoundary from '../components/ErrorBoundary'
+import InsightsTab from '../components/Projects/InsightsTab'
 
+// ── Helpers ────────────────────────────────────────────────────
 function strToHue(str = '') {
   let h = 0
   for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) % 360
@@ -18,11 +25,11 @@ function strToHue(str = '') {
 function enrichLead(lead) {
   if (lead.square_footage && lead.density && lead.item_quality_score && lead.job_type) {
     const score = calculateDeal({
-      sqft: Number(lead.square_footage),
-      density: lead.density,
+      sqft:        Number(lead.square_footage),
+      density:     lead.density,
       itemQuality: Number(lead.item_quality_score),
-      jobType: lead.job_type,
-      zipCode: lead.zip_code,
+      jobType:     lead.job_type,
+      zipCode:     lead.zip_code,
     })
     return { ...lead, deal_score: score.dealScore, _scoreDetails: score }
   }
@@ -30,23 +37,21 @@ function enrichLead(lead) {
 }
 
 function getProjectStatus(lead) {
-  if (lead.status === 'Won') return 'Won'
-  if (lead.status === 'Lost') return 'Lost'
+  if (lead.status === 'Won')    return 'Won'
+  if (lead.status === 'Lost')   return 'Lost'
   if (lead.status === 'Project Scheduled' || lead.status === 'Project Accepted') return 'Scheduled'
   return 'Scored'
 }
 
 function exportCSV(rows) {
-  const headers = ['Name', 'Address', 'Job Type', 'Status', 'Square Footage', 'Density', 'Quality', 'Deal Score', 'Rec. Bid', 'Notes']
+  const headers = ['Name','Address','Job Type','Status','Square Footage','Density','Quality','Deal Score','Rec. Bid','Notes']
   const csvRows = [headers.join(',')]
   for (const l of rows) {
     csvRows.push([
-      `"${(l.name || '').replace(/"/g, '""')}"`,
+      `"${(l.name  || '').replace(/"/g, '""')}"`,
       `"${(l.address || '').replace(/"/g, '""')}"`,
-      l.job_type || '',
-      l.status || '',
-      l.square_footage || '',
-      l.density || '',
+      l.job_type || '', l.status || '',
+      l.square_footage || '', l.density || '',
       l.item_quality_score || '',
       l.deal_score != null ? l.deal_score.toFixed(1) : '',
       l._scoreDetails?.recommendedBid || '',
@@ -72,18 +77,14 @@ function downloadCSVTemplate() {
   URL.revokeObjectURL(a.href)
 }
 
-// ── Shared UI ──────────────────────────────────────────────────
-
-function StatMini({ label, value, suffix }) {
-  return (
-    <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 12, padding: '14px 16px', boxShadow: 'var(--shadow-1)' }}>
-      <div className="tnum" style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', lineHeight: 1, color: 'var(--ink-1)' }}>{value}</div>
-      {suffix && <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 2 }}>{suffix}</div>}
-      <div style={{ fontSize: 11.5, color: 'var(--ink-3)', fontWeight: 500, marginTop: 4 }}>{label}</div>
-    </div>
-  )
+function fmtCurrency(n) {
+  if (!n) return '—'
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000)     return `$${(n / 1_000).toFixed(1)}k`
+  return `$${Math.round(n).toLocaleString()}`
 }
 
+// ── Shared UI ──────────────────────────────────────────────────
 function TabBtn({ active, onClick, label, count }) {
   return (
     <button onClick={onClick} style={{
@@ -95,12 +96,14 @@ function TabBtn({ active, onClick, label, count }) {
       marginRight: 18, fontFamily: 'inherit',
     }}>
       {label}
-      <span style={{
-        fontSize: 11, fontWeight: 600,
-        color: active ? 'var(--accent-ink)' : 'var(--ink-4)',
-        background: active ? 'var(--accent-soft)' : 'var(--bg-2)',
-        padding: '1px 7px', borderRadius: 999,
-      }}>{count}</span>
+      {count != null && (
+        <span style={{
+          fontSize: 11, fontWeight: 600,
+          color: active ? 'var(--accent-ink)' : 'var(--ink-4)',
+          background: active ? 'var(--accent-soft)' : 'var(--bg-2)',
+          padding: '1px 7px', borderRadius: 999,
+        }}>{count}</span>
+      )}
     </button>
   )
 }
@@ -117,25 +120,112 @@ function FilterChip({ label, active, onClick }) {
   )
 }
 
-// ── ProjectCard ────────────────────────────────────────────────
+// ── ActionStatCard ─────────────────────────────────────────────
+function ActionStatCard({ icon: Icon, iconBg, iconColor, value, label, subtext, subtextColor, onClick, tintBg, valueColor }) {
+  const [hover, setHover] = useState(false)
+  const isClick = !!onClick
+  return (
+    <div
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        background: tintBg || 'var(--panel)',
+        border: `1px solid ${hover && isClick ? 'var(--accent)' : 'var(--line)'}`,
+        borderRadius: 12, padding: '14px 16px',
+        boxShadow: hover && isClick ? 'var(--shadow-2)' : 'var(--shadow-1)',
+        cursor: isClick ? 'pointer' : 'default',
+        transform: hover && isClick ? 'translateY(-1px)' : 'none',
+        transition: 'transform 120ms, box-shadow 120ms, border-color 120ms',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        <div style={{
+          width: 34, height: 34, borderRadius: 9,
+          background: iconBg, color: iconColor,
+          display: 'grid', placeItems: 'center', flexShrink: 0,
+        }}>
+          <Icon size={16} strokeWidth={1.9} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div className="tnum" style={{ fontSize: 26, fontWeight: 700, color: valueColor || 'var(--ink-1)', letterSpacing: '-0.03em', lineHeight: 1 }}>
+            {value}
+          </div>
+          <div style={{ fontSize: 11.5, color: 'var(--ink-3)', fontWeight: 500, marginTop: 5 }}>{label}</div>
+        </div>
+      </div>
+      {subtext && (
+        <div style={{ fontSize: 11, color: subtextColor || 'var(--ink-4)', marginTop: 8, fontWeight: subtextColor ? 600 : 400 }}>
+          {subtext}
+        </div>
+      )}
+      {isClick && (
+        <div style={{ fontSize: 11, color: hover ? 'var(--accent-ink)' : 'var(--ink-4)', fontWeight: 600, marginTop: 6, display: 'flex', alignItems: 'center', gap: 4, transition: 'color 120ms' }}>
+          {hover ? 'Filter by this →' : 'Click to filter'}
+        </div>
+      )}
+    </div>
+  )
+}
 
+// ── Bid Accuracy mini card ──────────────────────────────────────
+function BidAccuracyStatCard({ dealScores }) {
+  const tagged = dealScores.filter(d => d.bid_tag)
+  const good  = tagged.filter(d => d.bid_tag === 'Good Bid').length
+  const under = tagged.filter(d => d.bid_tag === 'Underbid').length
+  const over  = tagged.filter(d => d.bid_tag === 'Overbid').length
+  const total = tagged.length
+  const goodPct = total ? Math.round((good / total) * 100) : null
+
+  return (
+    <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 12, padding: '14px 16px', boxShadow: 'var(--shadow-1)' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        <div style={{ width: 34, height: 34, borderRadius: 9, background: 'color-mix(in oklab, var(--accent) 16%, var(--panel))', color: 'var(--accent)', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+          <Target size={16} strokeWidth={1.9} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div className="tnum" style={{ fontSize: 26, fontWeight: 700, letterSpacing: '-0.03em', lineHeight: 1, color: total ? 'var(--win)' : 'var(--ink-1)' }}>
+            {goodPct != null ? `${goodPct}%` : '—'}
+          </div>
+          <div style={{ fontSize: 11.5, color: 'var(--ink-3)', fontWeight: 500, marginTop: 5 }}>Bid Accuracy</div>
+        </div>
+      </div>
+      {total > 0 ? (
+        <>
+          <div style={{ display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden', marginTop: 10, gap: 1 }}>
+            {good  > 0 && <div style={{ flex: good,  background: '#22C55E', title: `Good: ${good}` }} />}
+            {under > 0 && <div style={{ flex: under, background: '#EF4444' }} />}
+            {over  > 0 && <div style={{ flex: over,  background: '#F59E0B' }} />}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 6 }}>
+            {good} good · {under} under · {over} over ({total} tagged)
+          </div>
+        </>
+      ) : (
+        <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 8 }}>no bids tagged yet</div>
+      )}
+    </div>
+  )
+}
+
+// ── ProjectCard ────────────────────────────────────────────────
 function ProjectCard({ lead, onOpen }) {
-  const score = lead.deal_score
-  const bid = lead._scoreDetails?.recommendedBid
-  const sqft = lead.square_footage
+  const score  = lead.deal_score
+  const bid    = lead._scoreDetails?.recommendedBid
+  const sqft   = lead.square_footage
   const status = getProjectStatus(lead)
-  const owner = (lead.assigned_to || 'MR').slice(0, 2).toUpperCase()
-  const hue = strToHue(lead.assigned_to || 'mr')
+  const owner  = (lead.assigned_to || 'MR').slice(0, 2).toUpperCase()
+  const hue    = strToHue(lead.assigned_to || 'mr')
   const source = lead.deal_score ? 'Scored' : 'Imported'
 
   const scoreColor = score >= 8 ? 'var(--win)' : score >= 6 ? 'var(--accent-ink)' : score >= 4 ? 'var(--warn)' : 'var(--lose)'
   const scoreBg    = score >= 8 ? 'var(--win-soft)' : score >= 6 ? 'var(--accent-soft)' : score >= 4 ? 'var(--warn-soft)' : 'var(--lose-soft)'
 
   const statusStyle = {
-    Scored:    { fg: 'var(--ink-2)',  bg: 'var(--bg-2)'       },
-    Scheduled: { fg: 'var(--warn)',   bg: 'var(--warn-soft)'  },
-    Won:       { fg: 'var(--win)',    bg: 'var(--win-soft)'   },
-    Lost:      { fg: 'var(--lose)',   bg: 'var(--lose-soft)'  },
+    Scored:    { fg: 'var(--ink-2)',  bg: 'var(--bg-2)'      },
+    Scheduled: { fg: 'var(--warn)',   bg: 'var(--warn-soft)' },
+    Won:       { fg: 'var(--win)',    bg: 'var(--win-soft)'  },
+    Lost:      { fg: 'var(--lose)',   bg: 'var(--lose-soft)' },
   }[status] || { fg: 'var(--ink-2)', bg: 'var(--bg-2)' }
 
   const typeStyle = {
@@ -155,28 +245,23 @@ function ProjectCard({ lead, onOpen }) {
       display: 'flex', flexDirection: 'column', gap: 10, cursor: 'pointer',
       transition: 'transform 120ms, box-shadow 120ms',
     }}
-    onMouseOver={e => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = 'var(--shadow-2)' }}
-    onMouseOut={e => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = 'var(--shadow-1)' }}>
-      {/* Top row */}
+    onMouseOver={e  => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = 'var(--shadow-2)' }}
+    onMouseOut={e   => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = 'var(--shadow-1)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <span style={{ fontSize: 10.5, fontWeight: 600, background: typeStyle.bg, color: typeStyle.fg, padding: '2px 7px', borderRadius: 5 }}>{lead.job_type || 'Unknown'}</span>
         <span className="mono" style={{ fontSize: 10.5, color: 'var(--ink-4)' }}>#{String(lead.id).slice(0, 6)}</span>
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 10.5, fontWeight: 600, color: statusStyle.fg, background: statusStyle.bg, padding: '2px 8px', borderRadius: 999 }}>{status}</span>
       </div>
-
-      {/* Name + Address */}
       <div>
         <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink-1)', letterSpacing: '-0.01em' }}>{lead.name}</div>
         {lead.address && (
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 5, marginTop: 3, fontSize: 12, color: 'var(--ink-3)' }}>
-            <MapPin size={12} strokeWidth={1.8} color="var(--ink-4)" style={{ marginTop: 1, flexShrink: 0 }} />
+            <span style={{ fontSize: 12, color: 'var(--ink-4)', marginTop: 1, flexShrink: 0 }}>📍</span>
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{lead.address}</span>
           </div>
         )}
       </div>
-
-      {/* Score / Bid / Size */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', borderTop: '1px solid var(--line-2)', borderBottom: '1px solid var(--line-2)' }}>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 10, color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>Score</div>
@@ -195,8 +280,6 @@ function ProjectCard({ lead, onOpen }) {
           <div className="tnum" style={{ fontSize: 12.5, fontWeight: 500, marginTop: 3 }}>{sqft ? `${Number(sqft).toLocaleString()} sqft` : '—'}</div>
         </div>
       </div>
-
-      {/* Footer */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: 'var(--ink-3)' }}>
         <span style={{ width: 20, height: 20, borderRadius: '50%', background: `oklch(0.72 0.08 ${hue})`, color: 'white', fontSize: 9, fontWeight: 600, display: 'grid', placeItems: 'center', flexShrink: 0 }}>{owner}</span>
         {dateStr && <span>{dateStr}</span>}
@@ -210,7 +293,6 @@ function ProjectCard({ lead, onOpen }) {
 }
 
 // ── ProjectTable ───────────────────────────────────────────────
-
 function ProjectTable({ rows, onOpen }) {
   return (
     <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 12, overflowX: 'auto' }}>
@@ -220,13 +302,13 @@ function ProjectTable({ rows, onOpen }) {
         </div>
         {rows.map((lead, i) => {
           const status = getProjectStatus(lead)
-          const owner = (lead.assigned_to || 'MR').slice(0, 2).toUpperCase()
-          const hue = strToHue(lead.assigned_to || 'mr')
+          const owner  = (lead.assigned_to || 'MR').slice(0, 2).toUpperCase()
+          const hue    = strToHue(lead.assigned_to || 'mr')
           return (
             <div key={lead.id} onClick={() => onOpen && onOpen(lead)}
               style={{ display: 'grid', gridTemplateColumns: '60px 1.3fr 80px 60px 70px 70px 100px 80px 80px', gap: 8, padding: '11px 14px', alignItems: 'center', fontSize: 12.5, borderBottom: i < rows.length - 1 ? '1px solid var(--line-2)' : 'none', cursor: 'pointer' }}
               onMouseOver={e => e.currentTarget.style.background = 'var(--bg-2)'}
-              onMouseOut={e => e.currentTarget.style.background = 'transparent'}>
+              onMouseOut={e  => e.currentTarget.style.background = 'transparent'}>
               <span className="mono" style={{ fontSize: 11, color: 'var(--ink-3)' }}>#{String(lead.id).slice(0, 6)}</span>
               <div>
                 <div style={{ fontWeight: 600, color: 'var(--ink-1)' }}>{lead.name}</div>
@@ -251,7 +333,6 @@ function ProjectTable({ rows, onOpen }) {
 }
 
 // ── Portfolio ──────────────────────────────────────────────────
-
 function PortfolioCard({ lead, onOpen }) {
   const hue = strToHue(lead.assigned_to || lead.name || 'mr')
   const bid = lead._scoreDetails?.recommendedBid
@@ -261,8 +342,8 @@ function PortfolioCard({ lead, onOpen }) {
       overflow: 'hidden', cursor: 'pointer', boxShadow: 'var(--shadow-1)',
       transition: 'transform 120ms, box-shadow 120ms',
     }}
-    onMouseOver={e => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = 'var(--shadow-2)' }}
-    onMouseOut={e => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = 'var(--shadow-1)' }}>
+    onMouseOver={e  => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = 'var(--shadow-2)' }}
+    onMouseOut={e   => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = 'var(--shadow-1)' }}>
       <div style={{ aspectRatio: '16/10', background: `linear-gradient(135deg, oklch(0.82 0.08 ${hue}), oklch(0.62 0.11 ${hue}))`, position: 'relative' }}>
         <div style={{ position: 'absolute', top: 10, left: 10, display: 'flex', gap: 6 }}>
           <span style={{ fontSize: 10.5, fontWeight: 600, background: 'rgba(255,255,255,0.9)', color: '#2a2a2a', padding: '2px 8px', borderRadius: 5 }}>{lead.job_type}</span>
@@ -285,19 +366,20 @@ function PortfolioCard({ lead, onOpen }) {
 }
 
 function PortfolioView({ rows, onOpen, onBuildDeck }) {
+  const { Star } = { Star: () => <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> }
   const portfolio = rows.filter(l => (l.deal_score || 0) >= 7 || l.status === 'Won')
   return (
     <div>
       <div style={{ background: 'color-mix(in oklab, var(--accent-soft) 50%, var(--panel))', border: '1px solid color-mix(in oklab, var(--accent) 22%, var(--line))', borderRadius: 14, padding: '14px 18px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 14 }}>
         <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--accent)', color: 'white', display: 'grid', placeItems: 'center' }}>
-          <Star size={17} strokeWidth={1.9} />
+          <Star />
         </div>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 13.5, fontWeight: 600, letterSpacing: '-0.01em' }}>Portfolio view</div>
           <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>Share-ready gallery of your best-performing projects.</div>
         </div>
         <button onClick={onBuildDeck} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 13px 7px 10px', borderRadius: 10, border: 'none', background: 'var(--accent)', color: 'white', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
-          <Star size={13} strokeWidth={1.9} /> Build deck
+          <Star /> Build deck
         </button>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
@@ -313,77 +395,134 @@ function PortfolioView({ rows, onOpen, onBuildDeck }) {
 }
 
 // ── CurrentProjectsTab ─────────────────────────────────────────
+function CurrentProjectsTab({ rows, allLeads, onOpen, onBuildDeck }) {
+  const [view,        setView]        = useState('grid')
+  const [status,      setStatus]      = useState('all')
+  const [sort,        setSort]        = useState('recent')
+  const [query,       setQuery]       = useState('')
+  const [quickFilter, setQuickFilter] = useState(null) // 'starting_soon' | 'needs_scoring'
 
-function CurrentProjectsTab({ rows, onOpen, onBuildDeck }) {
-  const [view, setView] = useState('grid')
-  const [status, setStatus] = useState('all')
-  const [sort, setSort] = useState('recent')
-  const [query, setQuery] = useState('')
+  const now       = new Date()
+  const moStart   = new Date(now.getFullYear(), now.getMonth(), 1)
+  const moEnd     = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59)
+  const in7       = new Date(now.getTime() + 7 * 86400000)
 
+  // ── Stat computations ──────────────────────────────────────
+  const stats = useMemo(() => {
+    const thisMonth = rows.filter(l => {
+      const ref = l.project_start ? new Date(l.project_start) : new Date(l.created_at)
+      return ['Project Scheduled', 'Project Accepted'].includes(l.status) && ref >= moStart && ref <= moEnd
+    })
+    const startingSoon = rows.filter(l => {
+      if (!l.project_start) return false
+      const d = new Date(l.project_start)
+      return d >= now && d <= in7
+    })
+    const needsScoring = allLeads.filter(l =>
+      l.status === 'Consult Completed' && (!l.deal_score || l.deal_score === 0),
+    )
+    const estRevenue = thisMonth.reduce((s, l) => s + (l._scoreDetails?.recommendedBid || 0), 0)
+    return { thisMonth, startingSoon, needsScoring, estRevenue }
+  }, [rows, allLeads])
+
+  // ── Filtered + sorted list ─────────────────────────────────
   const filtered = useMemo(() => {
     let list = rows
+
+    if (quickFilter === 'starting_soon') {
+      list = list.filter(l => {
+        if (!l.project_start) return false
+        const d = new Date(l.project_start)
+        return d >= now && d <= in7
+      })
+    } else if (quickFilter === 'needs_scoring') {
+      list = allLeads.filter(l =>
+        l.status === 'Consult Completed' && (!l.deal_score || l.deal_score === 0),
+      )
+    }
+
     if (status !== 'all') list = list.filter(l => getProjectStatus(l).toLowerCase() === status)
     if (query) {
       const q = query.toLowerCase()
       list = list.filter(l => l.name?.toLowerCase().includes(q) || l.address?.toLowerCase().includes(q))
     }
-    if (sort === 'score')  list = [...list].sort((a, b) => (b.deal_score || 0) - (a.deal_score || 0))
-    if (sort === 'value')  list = [...list].sort((a, b) => (b._scoreDetails?.recommendedBid || 0) - (a._scoreDetails?.recommendedBid || 0))
+    if (sort === 'score')  list = [...list].sort((a, b) => (b.deal_score || 0)                       - (a.deal_score || 0))
+    if (sort === 'value')  list = [...list].sort((a, b) => (b._scoreDetails?.recommendedBid || 0)   - (a._scoreDetails?.recommendedBid || 0))
     if (sort === 'recent') list = [...list].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
     return list
-  }, [rows, status, sort, query])
+  }, [rows, allLeads, status, sort, query, quickFilter])
 
-  const totalValue = filtered.reduce((s, l) => s + (l._scoreDetails?.recommendedBid || 0), 0)
-  const scored = filtered.filter(l => l.deal_score)
-  const avgScore = scored.length ? scored.reduce((s, l) => s + l.deal_score, 0) / scored.length : null
-  const wonCount = filtered.filter(l => l.status === 'Won').length
+  function toggleQF(key) { setQuickFilter(q => q === key ? null : key) }
 
-  const topScored = scored.length ? [...scored].sort((a, b) => (b.deal_score || 0) - (a.deal_score || 0))[0] : null
-  const withBid = filtered.filter(l => l._scoreDetails?.recommendedBid)
-  const topValue = withBid.length ? [...withBid].sort((a, b) => (b._scoreDetails?.recommendedBid || 0) - (a._scoreDetails?.recommendedBid || 0))[0] : null
+  const amberBg = 'color-mix(in oklab, #F59E0B 14%, var(--panel))'
+  const greenBg = 'color-mix(in oklab, var(--win) 12%, var(--panel))'
 
   return (
     <div style={{ padding: '0 28px 28px' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 16 }}>
-        <StatMini label="Total Projects" value={filtered.length} suffix={filtered.length !== rows.length ? `of ${rows.length}` : ''} />
-        <StatMini label="Won" value={wonCount} suffix="closed" />
-        <StatMini label="Avg Deal Score" value={avgScore != null ? avgScore.toFixed(1) : '—'} suffix="out of 10" />
-        <StatMini label="Pipeline Value" value={totalValue > 0 ? `$${(totalValue / 1000).toFixed(0)}k` : '—'} suffix="estimated" />
+      {/* ── Stat cards ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 16, marginTop: 16 }}>
+        <ActionStatCard
+          icon={Calendar}
+          iconBg="color-mix(in oklab, var(--accent) 16%, var(--panel))"
+          iconColor="var(--accent)"
+          value={stats.thisMonth.length}
+          label="Projects This Month"
+          subtext="active & scheduled"
+        />
+        <ActionStatCard
+          icon={Clock}
+          iconBg={stats.startingSoon.length > 3 ? 'color-mix(in oklab, var(--warn) 20%, var(--panel))' : 'color-mix(in oklab, var(--ink-3) 14%, var(--panel))'}
+          iconColor={stats.startingSoon.length > 3 ? 'var(--warn)' : 'var(--ink-3)'}
+          value={stats.startingSoon.length}
+          label="Starting Soon"
+          subtext={stats.startingSoon.length === 0 ? 'nothing upcoming' : 'next 7 days'}
+          tintBg={stats.startingSoon.length > 3 ? amberBg : undefined}
+          onClick={() => toggleQF('starting_soon')}
+        />
+        <ActionStatCard
+          icon={AlertCircle}
+          iconBg={stats.needsScoring.length > 0 ? 'color-mix(in oklab, var(--warn) 20%, var(--panel))' : 'color-mix(in oklab, var(--win) 16%, var(--panel))'}
+          iconColor={stats.needsScoring.length > 0 ? 'var(--warn)' : 'var(--win)'}
+          value={stats.needsScoring.length}
+          label="Needs Scoring"
+          subtext={stats.needsScoring.length === 0 ? 'all scored ✓' : 'no deal score yet'}
+          tintBg={stats.needsScoring.length > 0 ? amberBg : greenBg}
+          onClick={() => toggleQF('needs_scoring')}
+        />
+        <ActionStatCard
+          icon={DollarSign}
+          iconBg="color-mix(in oklab, var(--win) 16%, var(--panel))"
+          iconColor="var(--win)"
+          value={fmtCurrency(stats.estRevenue)}
+          label="Estimated Revenue"
+          subtext="active projects this month"
+        />
       </div>
 
-      {(topScored || topValue) && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
-          {topScored && (
-            <HighlightCard
-              label="Top Score"
-              client={topScored.name}
-              period={topScored.address || topScored.zip_code || '—'}
-              amount={`${topScored.deal_score?.toFixed(1)}/10`}
-              margin={topScored.job_type || '—'}
-              positive
-            />
-          )}
-          {topValue && (
-            <HighlightCard
-              label="Highest Value"
-              client={topValue.name}
-              period={topValue.address || topValue.zip_code || '—'}
-              amount={`$${(topValue._scoreDetails?.recommendedBid || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
-              margin={`${topValue.deal_score?.toFixed(1) || '—'}/10 score`}
-              positive
-            />
-          )}
+      {/* Active filter chip */}
+      {quickFilter && (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+          <button onClick={() => setQuickFilter(null)} style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            padding: '5px 11px', borderRadius: 999,
+            background: 'var(--accent-soft)', border: '1px solid var(--accent)',
+            color: 'var(--accent-ink)', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+          }}>
+            {quickFilter === 'starting_soon' ? '⏱ Starting Soon' : '⚠ Needs Scoring'}
+            <X size={11} />
+          </button>
         </div>
       )}
 
+      {/* ── Toolbar ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, padding: '6px 10px', minWidth: 240 }}>
           <Search size={13} strokeWidth={1.8} color="var(--ink-4)" />
           <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search projects…" style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontSize: 12.5, fontFamily: 'inherit', color: 'var(--ink-1)' }} />
           {query && <button onClick={() => setQuery('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-4)', display: 'flex', padding: 0 }}><X size={11} /></button>}
         </div>
-        <FilterChip label="All" active={status === 'all'} onClick={() => setStatus('all')} />
-        {['scored', 'scheduled', 'won', 'lost'].map(s => (
+        <FilterChip label="All"       active={status === 'all'}       onClick={() => setStatus('all')} />
+        {['scored','scheduled','won','lost'].map(s => (
           <FilterChip key={s} label={s.charAt(0).toUpperCase() + s.slice(1)} active={status === s} onClick={() => setStatus(s)} />
         ))}
         <div style={{ flex: 1 }} />
@@ -393,7 +532,7 @@ function CurrentProjectsTab({ rows, onOpen, onBuildDeck }) {
           <option value="value">Sort: Highest value</option>
         </select>
         <div style={{ display: 'inline-flex', background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, padding: 2 }}>
-          {['grid', 'table', 'portfolio'].map(v => (
+          {['grid','table','portfolio'].map(v => (
             <button key={v} onClick={() => setView(v)} style={{ padding: '4px 10px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 11.5, fontWeight: 600, background: view === v ? 'var(--accent-soft)' : 'transparent', color: view === v ? 'var(--accent-ink)' : 'var(--ink-3)', fontFamily: 'inherit' }}>
               {v.charAt(0).toUpperCase() + v.slice(1)}
             </button>
@@ -408,38 +547,61 @@ function CurrentProjectsTab({ rows, onOpen, onBuildDeck }) {
               {filtered.map(l => <ProjectCard key={l.id} lead={l} onOpen={onOpen} />)}
             </div>
       )}
-      {view === 'table' && <ProjectTable rows={filtered} onOpen={onOpen} />}
+      {view === 'table'     && <ProjectTable rows={filtered} onOpen={onOpen} />}
       {view === 'portfolio' && <PortfolioView rows={filtered} onOpen={onOpen} onBuildDeck={onBuildDeck} />}
     </div>
   )
 }
 
-// ── HighlightCard ──────────────────────────────────────────────
-
-function HighlightCard({ label, client, period, amount, margin, positive }) {
-  return (
-    <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 14, padding: '14px 16px', boxShadow: 'var(--shadow-1)', display: 'flex', alignItems: 'center', gap: 14 }}>
-      <div style={{ width: 40, height: 40, borderRadius: 12, background: positive ? 'var(--win-soft)' : 'var(--warn-soft)', color: positive ? 'var(--win)' : 'var(--warn)', display: 'grid', placeItems: 'center' }}>
-        <TrendingUp size={20} strokeWidth={2} />
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 10.5, color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>{label}</div>
-        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink-1)', marginTop: 2, letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{client}</div>
-        <div style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>{period}</div>
-      </div>
-      <div style={{ textAlign: 'right', flexShrink: 0 }}>
-        <div className="tnum" style={{ fontSize: 16, fontWeight: 600, color: positive ? 'var(--win)' : 'var(--warn)', letterSpacing: '-0.015em' }}>{amount}</div>
-        <div className="tnum" style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>{margin}</div>
-      </div>
-    </div>
-  )
-}
-
 // ── CompletedProjectsTab ───────────────────────────────────────
-
-function CompletedProjectsTab({ rows }) {
+function CompletedProjectsTab({ rows, dealScores }) {
   const [query, setQuery] = useState('')
-  const [sort, setSort] = useState('recent')
+  const [sort,  setSort]  = useState('recent')
+
+  const now     = new Date()
+  const moStart = new Date(now.getFullYear(), now.getMonth(), 1)
+  const lmStart = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+  const lmEnd   = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59)
+
+  const moName  = now.toLocaleDateString('en-US', { month: 'long' })
+  const lmName  = new Date(lmStart).toLocaleDateString('en-US', { month: 'long' })
+
+  // ── Stat computations ──────────────────────────────────────
+  const stats = useMemo(() => {
+    const thisMonth = rows.filter(l => new Date(l.updated_at || l.created_at) >= moStart)
+    const lastMonth = rows.filter(l => {
+      const d = new Date(l.updated_at || l.created_at)
+      return d >= lmStart && d <= lmEnd
+    })
+
+    const revThis = thisMonth.reduce((s, l) => s + (l._scoreDetails?.recommendedBid || 0), 0)
+    const revLast = lastMonth.reduce((s, l) => s + (l._scoreDetails?.recommendedBid || 0), 0)
+    const revDiff = revThis - revLast
+
+    // Avg profit margin
+    const withMargin = rows.filter(l => l._scoreDetails?.profitMarginPct != null)
+    const avgMargin  = withMargin.length
+      ? withMargin.reduce((s, l) => s + l._scoreDetails.profitMarginPct, 0) / withMargin.length
+      : null
+
+    return { thisMonth, revThis, revLast, revDiff, withMargin, avgMargin }
+  }, [rows])
+
+  const marginColor = stats.avgMargin == null ? 'var(--ink-1)'
+    : stats.avgMargin >= 40 ? 'var(--win)'
+    : stats.avgMargin >= 20 ? 'var(--warn)' : 'var(--lose)'
+
+  const revDiffStr = stats.revDiff !== 0 && stats.revLast > 0
+    ? (stats.revDiff > 0 ? `+${fmtCurrency(stats.revDiff)}` : `-${fmtCurrency(Math.abs(stats.revDiff))}`) + ` vs ${lmName}`
+    : moName
+
+  function getRevenue(l) { return l._scoreDetails?.recommendedBid || 0 }
+  function getProfit(l)  { return l._scoreDetails?.estimatedProfit || 0 }
+  function getMargin(l)  {
+    if (l._scoreDetails?.profitMarginPct != null) return l._scoreDetails.profitMarginPct
+    const rev = getRevenue(l); const profit = getProfit(l)
+    return rev > 0 ? Math.round((profit / rev) * 100) : null
+  }
 
   const filtered = useMemo(() => {
     let list = rows
@@ -447,61 +609,47 @@ function CompletedProjectsTab({ rows }) {
       const q = query.toLowerCase()
       list = list.filter(l => l.name?.toLowerCase().includes(q) || l.address?.toLowerCase().includes(q))
     }
-    if (sort === 'profit')  list = [...list].sort((a, b) => (b._scoreDetails?.estimatedProfit || 0) - (a._scoreDetails?.estimatedProfit || 0))
-    if (sort === 'revenue') list = [...list].sort((a, b) => (b._scoreDetails?.recommendedBid || 0) - (a._scoreDetails?.recommendedBid || 0))
-    if (sort === 'margin')  list = [...list].sort((a, b) => (b._scoreDetails?.profitMarginPct || 0) - (a._scoreDetails?.profitMarginPct || 0))
+    if (sort === 'profit')  list = [...list].sort((a, b) => getProfit(b)  - getProfit(a))
+    if (sort === 'revenue') list = [...list].sort((a, b) => getRevenue(b) - getRevenue(a))
+    if (sort === 'margin')  list = [...list].sort((a, b) => (getMargin(b) ?? -99) - (getMargin(a) ?? -99))
     if (sort === 'recent')  list = [...list].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
     return list
   }, [rows, sort, query])
 
-  const totalRev = filtered.reduce((s, l) => s + (l._scoreDetails?.recommendedBid || 0), 0)
-  const totalProfit = filtered.reduce((s, l) => s + (l._scoreDetails?.estimatedProfit || 0), 0)
-  const withMargin = filtered.filter(l => l._scoreDetails?.profitMarginPct != null)
-  const avgMargin = withMargin.length
-    ? (withMargin.reduce((s, l) => s + (l._scoreDetails?.profitMarginPct || 0), 0) / withMargin.length).toFixed(0)
-    : null
-
-  function parseNotes(notes, key) {
-    const m = String(notes || '').match(new RegExp(key + ':\\s*\\$?([\\d,.-]+)', 'i'))
-    return m ? parseFloat(m[1].replace(/,/g, '')) : null
-  }
-  function getRevenue(l) { return l._scoreDetails?.recommendedBid || parseNotes(l.notes, 'Revenue') || 0 }
-  function getProfit(l)  { return l._scoreDetails?.estimatedProfit || parseNotes(l.notes, 'Net profit') || 0 }
-  function getMargin(l)  {
-    if (l._scoreDetails?.profitMarginPct) return l._scoreDetails.profitMarginPct
-    const rev = getRevenue(l); const profit = getProfit(l)
-    return rev > 0 ? Math.round((profit / rev) * 100) : null
-  }
-
-  const withData = filtered.filter(l => getRevenue(l) > 0 || getProfit(l) > 0)
-  const best  = withData.length ? [...withData].sort((a, b) => getProfit(b) - getProfit(a))[0] : null
-  const worst = withData.length ? [...withData].sort((a, b) => (getMargin(a) ?? 999) - (getMargin(b) ?? 999))[0] : null
-
   return (
     <div style={{ padding: '0 28px 28px' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 16 }}>
-        <StatMini label="Completed" value={rows.length} suffix="projects" />
-        <StatMini label="Total Revenue (Est.)" value={totalRev > 0 ? `$${(totalRev / 1000).toFixed(1)}k` : '—'} suffix="all completed" />
-        <StatMini label="Total Profit (Est.)" value={totalProfit > 0 ? `$${(totalProfit / 1000).toFixed(1)}k` : '—'} suffix={`${filtered.length} projects`} />
-        <StatMini label="Avg Margin (Est.)" value={avgMargin != null ? `${avgMargin}%` : '—'} suffix="net estimated" />
+      {/* ── Stat cards ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 16, marginTop: 16 }}>
+        <ActionStatCard
+          icon={CheckCircle}
+          iconBg="color-mix(in oklab, var(--win) 16%, var(--panel))"
+          iconColor="var(--win)"
+          value={stats.thisMonth.length}
+          label="Completed This Month"
+          subtext={moName}
+        />
+        <ActionStatCard
+          icon={TrendingUp}
+          iconBg="color-mix(in oklab, var(--accent) 16%, var(--panel))"
+          iconColor="var(--accent)"
+          value={fmtCurrency(stats.revThis)}
+          label="Total Revenue"
+          subtext={revDiffStr}
+          subtextColor={stats.revDiff > 0 ? 'var(--win)' : stats.revDiff < 0 ? 'var(--lose)' : undefined}
+        />
+        <ActionStatCard
+          icon={BarChart2}
+          iconBg={`color-mix(in oklab, ${stats.avgMargin == null ? 'var(--ink-3)' : stats.avgMargin >= 40 ? 'var(--win)' : stats.avgMargin >= 20 ? 'var(--warn)' : 'var(--lose)'} 16%, var(--panel))`}
+          iconColor={marginColor}
+          value={stats.avgMargin != null ? `${Math.round(stats.avgMargin)}%` : '—'}
+          valueColor={marginColor}
+          label="Avg Profit Margin"
+          subtext={`across ${stats.withMargin.length} project${stats.withMargin.length !== 1 ? 's' : ''}`}
+        />
+        <BidAccuracyStatCard dealScores={dealScores} />
       </div>
 
-      {best && worst && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
-          <HighlightCard
-            label="Best Performer" client={best.name} period={best.address || '—'}
-            amount={`+$${getProfit(best).toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
-            margin={getMargin(best) != null ? `${getMargin(best)}% margin` : `$${getRevenue(best).toLocaleString(undefined, { maximumFractionDigits: 0 })} revenue`}
-            positive
-          />
-          <HighlightCard
-            label="Lowest Margin" client={worst.name} period={worst.address || '—'}
-            amount={`+$${getProfit(worst).toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
-            margin={getMargin(worst) != null ? `${getMargin(worst)}% margin` : `$${getRevenue(worst).toLocaleString(undefined, { maximumFractionDigits: 0 })} revenue`}
-          />
-        </div>
-      )}
-
+      {/* ── Toolbar ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, padding: '6px 10px', minWidth: 240 }}>
           <Search size={13} strokeWidth={1.8} color="var(--ink-4)" />
@@ -516,27 +664,25 @@ function CompletedProjectsTab({ rows }) {
         </select>
       </div>
 
+      {/* ── Table ── */}
       <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 12, overflowX: 'auto' }}>
         <div style={{ minWidth: 800 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 70px 110px 100px 90px 110px 70px 60px', gap: 8, padding: '10px 14px', fontSize: 10.5, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600, borderBottom: '1px solid var(--line)', background: 'var(--bg-2)' }}>
             <span>Client</span><span>Type</span><span>Revenue (Est.)</span><span>Labor (Est.)</span><span>Royalties</span><span>Profit (Est.)</span><span>Margin</span><span>Owner</span>
           </div>
           {filtered.map((lead, i) => {
-            const bid = lead._scoreDetails?.recommendedBid || 0
-            const labor = lead._scoreDetails?.labourCost || 0
-            const royalties = Math.round(bid * 0.08)
-            const profit = lead._scoreDetails?.estimatedProfit ?? null
-            const marginPct = lead._scoreDetails?.profitMarginPct != null ? Math.round(lead._scoreDetails.profitMarginPct) : null
-            const marginColor = marginPct == null ? 'var(--ink-4)'
-              : marginPct >= 40 ? 'var(--win)'
-              : marginPct >= 20 ? 'var(--accent-ink)'
-              : marginPct >= 10 ? 'var(--warn)' : 'var(--lose)'
-            const owner = (lead.assigned_to || 'MR').slice(0, 2).toUpperCase()
-            const hue = strToHue(lead.assigned_to || 'mr')
+            const bid        = lead._scoreDetails?.recommendedBid || 0
+            const labor      = lead._scoreDetails?.labourCost || 0
+            const royalties  = Math.round(bid * 0.08)
+            const profit     = lead._scoreDetails?.estimatedProfit ?? null
+            const marginPct  = lead._scoreDetails?.profitMarginPct != null ? Math.round(lead._scoreDetails.profitMarginPct) : null
+            const marginColor = marginPct == null ? 'var(--ink-4)' : marginPct >= 40 ? 'var(--win)' : marginPct >= 20 ? 'var(--accent-ink)' : marginPct >= 10 ? 'var(--warn)' : 'var(--lose)'
+            const owner      = (lead.assigned_to || 'MR').slice(0, 2).toUpperCase()
+            const hue        = strToHue(lead.assigned_to || 'mr')
             return (
               <div key={lead.id} style={{ display: 'grid', gridTemplateColumns: '1.3fr 70px 110px 100px 90px 110px 70px 60px', gap: 8, padding: '11px 14px', alignItems: 'center', fontSize: 12.5, borderBottom: i < filtered.length - 1 ? '1px solid var(--line-2)' : 'none' }}
                 onMouseOver={e => e.currentTarget.style.background = 'var(--bg-2)'}
-                onMouseOut={e => e.currentTarget.style.background = 'transparent'}>
+                onMouseOut={e  => e.currentTarget.style.background = 'transparent'}>
                 <div>
                   <div style={{ fontWeight: 600, color: 'var(--ink-1)' }}>{lead.name}</div>
                   <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>{lead.address || '—'}</div>
@@ -545,9 +691,7 @@ function CompletedProjectsTab({ rows }) {
                 <span className="tnum" style={{ fontWeight: 600 }}>{bid ? `$${bid.toLocaleString()}` : '—'}</span>
                 <span className="tnum" style={{ color: 'var(--ink-3)' }}>{labor ? `$${labor.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '—'}</span>
                 <span className="tnum" style={{ color: 'var(--ink-3)' }}>{royalties ? `$${royalties.toLocaleString()}` : '—'}</span>
-                <span className="tnum" style={{ fontWeight: 600, color: profit != null ? 'var(--win)' : 'var(--ink-4)' }}>
-                  {profit != null ? `$${profit.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : 'Pending'}
-                </span>
+                <span className="tnum" style={{ fontWeight: 600, color: profit != null ? 'var(--win)' : 'var(--ink-4)' }}>{profit != null ? `$${profit.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : 'Pending'}</span>
                 <span className="tnum" style={{ fontWeight: 600, color: marginColor }}>{marginPct != null ? `${marginPct}%` : '—'}</span>
                 <span style={{ display: 'inline-flex', alignItems: 'center' }}>
                   <span style={{ width: 20, height: 20, borderRadius: '50%', background: `oklch(0.72 0.08 ${hue})`, color: 'white', fontSize: 9, fontWeight: 600, display: 'grid', placeItems: 'center' }}>{owner}</span>
@@ -565,16 +709,17 @@ function CompletedProjectsTab({ rows }) {
 }
 
 // ── Main ───────────────────────────────────────────────────────
-
 export default function Projects() {
   const { organizationId } = useAuth()
-  const [leads, setLeads] = useState(() => MOCK_LEADS.map(enrichLead))
-  const [loading, setLoading] = useState(true)
-  const [tab, setTab] = useState('current')
-  const [showScorer, setShowScorer] = useState(false)
+  const [leads,      setLeads]      = useState([])
+  const [dealScores, setDealScores] = useState([])
+  const [loading,    setLoading]    = useState(true)
+  const [error,      setError]      = useState(null)
+  const [tab,        setTab]        = useState('current')
+  const [showScorer,    setShowScorer]    = useState(false)
   const [showPortfolio, setShowPortfolio] = useState(false)
   const [selectedProject, setSelectedProject] = useState(null)
-  const [scorerProject, setScorerProject] = useState(null)
+  const [scorerProject,   setScorerProject]   = useState(null)
   const fileRef = useRef()
 
   useEffect(() => {
@@ -585,13 +730,22 @@ export default function Projects() {
   useEffect(() => { fetchLeads() }, [])
 
   async function fetchLeads() {
-    setLoading(true)
+    setLoading(true); setError(null)
     try {
-      const { data } = await supabase.from('leads').select('*').order('created_at', { ascending: false })
-      const result = data && data.length > 0 ? data : MOCK_LEADS
-      setLeads(result.map(enrichLead))
-    } catch {
-      setLeads(MOCK_LEADS.map(enrichLead))
+      const [leadsRes, scoresRes] = await Promise.all([
+        supabase.from('leads').select('*').order('created_at', { ascending: false }),
+        supabase.from('deal_scores').select('id, lead_id, bid_tag, created_at'),
+      ])
+      if (leadsRes.error) {
+        logger.error('Projects fetchLeads error', leadsRes.error)
+        setError('Failed to load projects. Please try again.')
+      } else {
+        setLeads((leadsRes.data || []).map(enrichLead))
+      }
+      setDealScores(scoresRes.data || [])
+    } catch (e) {
+      logger.error('Projects fetchLeads threw', e)
+      setError('Failed to load projects. Please try again.')
     }
     setLoading(false)
   }
@@ -600,76 +754,68 @@ export default function Projects() {
     const file = e.target.files?.[0]
     if (!file) return
     e.target.value = ''
-
     let jsonRows = []
     const isXlsx = file.name.match(/\.(xlsx|xls)$/i)
-
     try {
       if (isXlsx) {
         const buf = await file.arrayBuffer()
-        const wb = XLSX.read(buf)
-        const ws = wb.Sheets[wb.SheetNames[0]]
-        jsonRows = XLSX.utils.sheet_to_json(ws, { defval: '' })
+        const wb  = XLSX.read(buf)
+        const ws  = wb.Sheets[wb.SheetNames[0]]
+        jsonRows  = XLSX.utils.sheet_to_json(ws, { defval: '' })
       } else {
-        const text = await file.text()
+        const text  = await file.text()
         const lines = text.trim().split('\n')
         if (lines.length < 2) { alert('CSV appears empty.'); return }
         const headers = lines[0].split(',').map(h => h.trim())
         for (let i = 1; i < lines.length; i++) {
-          const values = lines[i].split(',').map(v => v.trim().replace(/^"|"$/g, ''))
-          const row = {}
-          headers.forEach((h, idx) => { row[h] = values[idx] || '' })
+          const vals = lines[i].split(',').map(v => v.trim().replace(/^"|"$/g, ''))
+          const row  = {}
+          headers.forEach((h, idx) => { row[h] = vals[idx] || '' })
           jsonRows.push(row)
         }
       }
-    } catch (err) {
-      alert(`Failed to read file: ${err.message}`)
-      return
-    }
+    } catch (err) { alert(`Failed to read file: ${err.message}`); return }
 
-    if (jsonRows.length === 0) {
-      alert('No rows found in file.')
-      return
-    }
+    if (!jsonRows.length) { alert('No rows found in file.'); return }
 
-    // Normalise column names (lowercase, trim) to be flexible
-    const normalised = jsonRows.map(row => {
+    const norm = jsonRows.map(row => {
       const n = {}
       Object.entries(row).forEach(([k, v]) => { n[k.toLowerCase().trim().replace(/\s+/g, '_')] = v })
       return n
     })
 
-    const rows = normalised
-      .filter(row => row.name || row.client_name || row.property_name || row.address)
-      .map(row => ({
-        name: String(row.name || row.client_name || row.property_name || row.address || 'Untitled'),
-        job_type: row.job_type || row.type || 'Both',
-        square_footage: row.square_footage || row.sqft ? parseInt(row.square_footage || row.sqft) : null,
-        density: row.density || 'Medium',
-        item_quality_score: row.item_quality_score || row.quality ? parseInt(row.item_quality_score || row.quality) : null,
-        zip_code: row.zip_code || row.zip ? String(row.zip_code || row.zip) : null,
-        address: row.address || null,
-        notes: row.notes || row.note || null,
-        status: 'Won',
+    const rows = norm
+      .filter(r => r.name || r.client_name || r.property_name || r.address)
+      .map(r => ({
+        name:               String(r.name || r.client_name || r.property_name || r.address || 'Untitled'),
+        job_type:           r.job_type || r.type || 'Both',
+        square_footage:     r.square_footage || r.sqft ? parseInt(r.square_footage || r.sqft) : null,
+        density:            r.density || 'Medium',
+        item_quality_score: r.item_quality_score || r.quality ? parseInt(r.item_quality_score || r.quality) : null,
+        zip_code:           r.zip_code || r.zip ? String(r.zip_code || r.zip) : null,
+        address:            r.address || null,
+        notes:              r.notes || r.note || null,
+        status:             'Won',
       }))
 
-    if (rows.length === 0) {
-      const cols = Object.keys(jsonRows[0] || {}).join(', ')
-      alert(`No importable rows found.\n\nColumns detected: ${cols}\n\nExpected a column named: name, client_name, property_name, or address.`)
+    if (!rows.length) {
+      alert(`No importable rows found.\n\nColumns detected: ${Object.keys(jsonRows[0] || {}).join(', ')}\n\nExpected: name, client_name, property_name, or address.`)
       return
     }
 
     const { error } = await supabase.from('leads').insert(rows.map(r => ({ ...r, organization_id: organizationId })))
-    if (error) {
-      alert(`Import failed: ${error.message}`)
-    } else {
-      alert(`Imported ${rows.length} project${rows.length !== 1 ? 's' : ''} successfully.`)
-      fetchLeads()
-    }
+    if (error) { alert(`Import failed: ${error.message}`) }
+    else { alert(`Imported ${rows.length} project${rows.length !== 1 ? 's' : ''} successfully.`); fetchLeads() }
   }
 
   const completedLeads = leads.filter(l => l.status === 'Won' || l.status === 'Project Completed')
-  const currentLeads = leads.filter(l => l.status !== 'Won' && l.status !== 'Project Completed')
+  const currentLeads   = leads.filter(l => l.status !== 'Won' && l.status !== 'Project Completed')
+
+  const headerSubtext = {
+    current:   `${currentLeads.length} active · scored & scheduled`,
+    completed: `${completedLeads.length} completed · with P&L estimates`,
+    insights:  'Analytics from your completed project history',
+  }[tab]
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
@@ -677,11 +823,7 @@ export default function Projects() {
       <div style={{ padding: '16px 28px', borderBottom: '1px solid var(--line)', background: 'var(--panel)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
         <div>
           <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--ink-1)', margin: 0, letterSpacing: '-0.02em' }}>Projects</h1>
-          <p style={{ fontSize: 12.5, color: 'var(--ink-3)', margin: '2px 0 0' }}>
-            {tab === 'current'
-              ? `${currentLeads.length} active · scored & scheduled`
-              : `${completedLeads.length} completed · with P&L estimates`}
-          </p>
+          <p style={{ fontSize: 12.5, color: 'var(--ink-3)', margin: '2px 0 0' }}>{headerSubtext}</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={() => exportCSV(tab === 'current' ? currentLeads : completedLeads)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 13px', borderRadius: 9, border: '1px solid var(--line)', background: 'var(--panel)', color: 'var(--ink-2)', fontSize: 12.5, fontWeight: 500, cursor: 'pointer', boxShadow: 'var(--shadow-1)', fontFamily: 'inherit' }}>
@@ -704,14 +846,24 @@ export default function Projects() {
       <div style={{ padding: '0 28px', borderBottom: '1px solid var(--line)', display: 'flex', gap: 4, background: 'var(--panel)' }}>
         <TabBtn active={tab === 'current'}   onClick={() => setTab('current')}   label="Current"   count={currentLeads.length} />
         <TabBtn active={tab === 'completed'} onClick={() => setTab('completed')} label="Completed" count={completedLeads.length} />
+        <TabBtn active={tab === 'insights'}  onClick={() => setTab('insights')}  label="Insights" />
       </div>
+
+      {error && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '12px 28px', padding: '10px 14px', borderRadius: 9, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#ef4444', fontSize: 13 }}>
+          {error}
+          <button className="btn btn-secondary" onClick={fetchLeads} style={{ marginLeft: 'auto', fontSize: 12 }}>Retry</button>
+        </div>
+      )}
 
       {loading ? (
         <div style={{ textAlign: 'center', color: 'var(--ink-4)', fontSize: 13, marginTop: 60 }}>Loading…</div>
       ) : tab === 'current' ? (
-        <CurrentProjectsTab rows={currentLeads} onOpen={setSelectedProject} onBuildDeck={() => setShowPortfolio(true)} />
+        <CurrentProjectsTab rows={currentLeads} allLeads={leads} onOpen={setSelectedProject} onBuildDeck={() => setShowPortfolio(true)} />
+      ) : tab === 'completed' ? (
+        <CompletedProjectsTab rows={completedLeads} dealScores={dealScores} />
       ) : (
-        <CompletedProjectsTab rows={completedLeads} />
+        <InsightsTab leads={leads} />
       )}
 
       {(showScorer || scorerProject) && (
@@ -723,17 +875,19 @@ export default function Projects() {
       )}
       <PortfolioBuilderModal open={showPortfolio} onClose={() => setShowPortfolio(false)} />
       {selectedProject && (
-        <ProjectDrawer
-          project={selectedProject}
-          onClose={() => setSelectedProject(null)}
-          onOpenScorer={p => { setSelectedProject(null); setScorerProject(p); }}
-          onProjectUpdated={fetchLeads}
-          onDelete={async id => {
-            await supabase.from('leads').delete().eq('id', id)
-            setLeads(prev => prev.filter(l => l.id !== id))
-            setSelectedProject(null)
-          }}
-        />
+        <ErrorBoundary inline>
+          <ProjectDrawer
+            project={selectedProject}
+            onClose={() => setSelectedProject(null)}
+            onOpenScorer={p => { setSelectedProject(null); setScorerProject(p) }}
+            onProjectUpdated={fetchLeads}
+            onDelete={async id => {
+              await supabase.from('leads').delete().eq('id', id)
+              setLeads(prev => prev.filter(l => l.id !== id))
+              setSelectedProject(null)
+            }}
+          />
+        </ErrorBoundary>
       )}
     </div>
   )

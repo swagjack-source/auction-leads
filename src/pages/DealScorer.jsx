@@ -791,7 +791,7 @@ export default function DealScorer() {
                     <Check size={15} color="var(--win)" />
                     <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--win)' }}>Added: {addedLead.name}</span>
                   </div>
-                  <a href="/" style={{ fontSize: 12, color: 'var(--win)', textDecoration: 'none' }}>View in Pipeline →</a>
+                  <a href="/pipeline" style={{ fontSize: 12, color: 'var(--win)', textDecoration: 'none' }}>View in Pipeline →</a>
                 </div>
               ) : (
                 <button onClick={() => setShowAddModal(true)} style={{

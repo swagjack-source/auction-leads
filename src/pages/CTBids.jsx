@@ -1,5 +1,205 @@
-import { useState, useMemo } from 'react'
-import { Search, Star, TrendingUp, Gavel, AlertTriangle, ArrowRight, Sparkles, Download } from 'lucide-react'
+import { useState, useMemo, useRef, useEffect } from 'react'
+import { Search, TrendingUp, AlertTriangle, Sparkles, Download, Upload, X, ArrowRight, Star, Gavel } from 'lucide-react'
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
+} from 'recharts'
+import supabase from '../lib/supabase'
+import CTBidsLiveTab from './CTBidsLiveTab'
+import CTBidsIntelligenceTab from './CTBidsIntelligenceTab'
+
+export const PROFIT_THRESHOLD = 60
+
+// ── CSV import helpers ────────────────────────────────────────
+
+const LS_KEY = 'ctbids_import'
+
+function loadImport() {
+  try { return JSON.parse(localStorage.getItem(LS_KEY) || 'null') } catch { return null }
+}
+function saveImport(data) {
+  localStorage.setItem(LS_KEY, JSON.stringify(data))
+}
+function clearImport() {
+  localStorage.removeItem(LS_KEY)
+}
+
+/**
+ * Parse a CTSeller item-level CSV export into the CT_DATA shape.
+ * Flexible column detection — handles various CTSeller export formats.
+ */
+function parseCTSellerCSV(text) {
+  const lines = text.trim().split(/\r?\n/)
+  if (lines.length < 2) throw new Error('File appears empty')
+
+  function parseRow(line) {
+    const cells = []
+    let cur = '', inQ = false
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i]
+      if (c === '"') { inQ = !inQ; continue }
+      if (c === ',' && !inQ) { cells.push(cur.trim()); cur = ''; continue }
+      cur += c
+    }
+    cells.push(cur.trim())
+    return cells
+  }
+
+  const headers = parseRow(lines[0]).map(h => h.toLowerCase().trim())
+
+  function col(row, ...candidates) {
+    for (const c of candidates) {
+      const idx = headers.indexOf(c)
+      if (idx !== -1 && row[idx] !== undefined) return row[idx].trim()
+    }
+    return ''
+  }
+
+  const rows = lines.slice(1)
+    .map(l => parseRow(l))
+    .filter(r => r.length > 1 && r.some(c => c.trim()))
+
+  if (rows.length === 0) throw new Error('No data rows found in file')
+
+  const items = rows.map(r => {
+    const price  = parseFloat(col(r, 'final price', 'sale price', 'winning bid', 'amount', 'price', 'sold price', 'final bid').replace(/[$,]/g, '')) || 0
+    const bids   = parseInt(col(r, 'bids', 'number of bids', 'bid count', 'total bids'), 10) || 0
+    const views  = parseInt(col(r, 'views', 'page views', 'view count', 'total views'), 10) || 0
+    const cat    = col(r, 'category', 'cat', 'item category', 'lot category') || 'Other'
+    const name   = col(r, 'title', 'name', 'item', 'lot title', 'item title', 'description', 'lot description')
+    const method = col(r, 'fulfillment', 'method', 'pickup or shipping', 'delivery', 'shipping method').toLowerCase()
+    const paidRaw= col(r, 'paid', 'payment status', 'invoice paid', 'invoice status').toLowerCase()
+    const paid   = paidRaw === 'yes' || paidRaw === 'paid' || paidRaw === '1' || paidRaw === 'true'
+    const auction= col(r, 'auction', 'auction name', 'auction title', 'sale', 'sale name', 'event')
+    const dateRaw= col(r, 'end date', 'date', 'auction date', 'close date', 'end')
+    const month  = dateRaw ? new Date(dateRaw).toLocaleString('en-US', { month: 'long' }) : ''
+    const year   = dateRaw ? new Date(dateRaw).getFullYear() : null
+    const isPickup = method.includes('pick')
+    return { price, bids, views, cat, name, method: isPickup ? 'pickup' : 'shipping', paid, auction, month, year }
+  }).filter(i => i.price > 0)
+
+  if (items.length === 0) throw new Error('No items with valid prices found. Check that the CSV has a "Final Price" or "Sale Price" column.')
+
+  const totalItems  = items.length
+  const totalRev    = items.reduce((s, i) => s + i.price, 0)
+  const paidCount   = items.filter(i => i.paid).length
+  const totalBP     = Math.round(totalRev * 0.18)
+  const prices      = [...items].map(i => i.price).sort((a, b) => a - b)
+  const median      = prices[Math.floor(prices.length / 2)] || 0
+  const maxPrice    = Math.max(...prices)
+  const avgBids     = items.reduce((s, i) => s + i.bids, 0) / items.length
+  const avgViews    = items.reduce((s, i) => s + i.views, 0) / items.length
+  const pickupCount = items.filter(i => i.method === 'pickup').length
+
+  const catMap = {}
+  for (const item of items) {
+    if (!catMap[item.cat]) catMap[item.cat] = { cat: item.cat, prices: [], bids: [], views: [], sold: 0, rev: 0 }
+    catMap[item.cat].sold++
+    catMap[item.cat].rev += item.price
+    catMap[item.cat].prices.push(item.price)
+    catMap[item.cat].bids.push(item.bids)
+    catMap[item.cat].views.push(item.views)
+  }
+  const categories = Object.values(catMap).map(c => {
+    const sorted = [...c.prices].sort((a, b) => a - b)
+    const avg    = c.rev / c.sold
+    const median = sorted[Math.floor(sorted.length / 2)] || 0
+    const max    = Math.max(...c.prices)
+    const bids   = c.bids.reduce((s, b) => s + b, 0) / c.bids.length
+    const views  = c.views.reduce((s, v) => s + v, 0) / c.views.length
+    return { cat: c.cat, sold: c.sold, rev: c.rev, avg, median, max, bids, views, pctRev: c.rev / totalRev }
+  }).sort((a, b) => b.rev - a.rev)
+
+  const topItems = [...items]
+    .sort((a, b) => b.price - a.price)
+    .slice(0, 30)
+    .map(i => ({ name: i.name, cat: i.cat, price: i.price, bids: i.bids, views: i.views, method: i.method, auction: i.auction }))
+
+  const saleMap = {}
+  for (const item of items) {
+    if (!item.auction) continue
+    if (!saleMap[item.auction]) saleMap[item.auction] = { title: item.auction, items: 0, rev: 0, bp: 0, bids: [], paid: 0, pickup: 0 }
+    saleMap[item.auction].items++
+    saleMap[item.auction].rev += item.price
+    saleMap[item.auction].bp += item.price * 0.18
+    saleMap[item.auction].bids.push(item.bids)
+    if (item.paid) saleMap[item.auction].paid++
+    if (item.method === 'pickup') saleMap[item.auction].pickup++
+  }
+  const sales = Object.values(saleMap).map(s => ({
+    title: s.title, items: s.items, rev: s.rev, bp: Math.round(s.bp),
+    avgPrice: s.rev / s.items,
+    maxPrice: 0,
+    avgBids: s.bids.reduce((a, b) => a + b, 0) / (s.bids.length || 1),
+    pickupPct: s.items > 0 ? s.pickup / s.items : 0,
+    paidPct: s.items > 0 ? s.paid / s.items : 0,
+  }))
+
+  const monthMap = {}
+  for (const item of items) {
+    if (!item.month || !item.year) continue
+    const key = `${item.month}-${item.year}`
+    if (!monthMap[key]) monthMap[key] = { month: item.month, year: item.year, online: 0, auction: 0, bp: 0 }
+    monthMap[key].online += item.price
+    monthMap[key].bp += item.price * 0.18
+  }
+  const MONTH_ORDER = ['January','February','March','April','May','June','July','August','September','October','November','December']
+  const monthly = Object.values(monthMap).sort((a, b) => {
+    if (a.year !== b.year) return a.year - b.year
+    return MONTH_ORDER.indexOf(a.month) - MONTH_ORDER.indexOf(b.month)
+  })
+
+  const topCatByRev = categories[0]
+  const topCatByAvg = [...categories].sort((a, b) => b.avg - a.avg)[0]
+
+  return {
+    _imported: { date: new Date().toISOString(), itemCount: totalItems },
+    summary: {
+      'Total Items Listed':      totalItems,
+      'Total Items Sold':        totalItems,
+      'Sell-Through Rate':       '100.0%',
+      'Total Revenue':           `$${totalRev.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      'Total Buyers Premium':    `$${totalBP.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      'Average Sale Price':      `$${(totalRev / totalItems).toFixed(2)}`,
+      'Median Sale Price':       `$${median.toFixed(2)}`,
+      'Highest Sale Price':      `$${maxPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}`,
+      'Average Bids per Item':   avgBids.toFixed(1),
+      'Average Views per Item':  Math.round(avgViews).toString(),
+      'Total Auctions':          sales.length || 1,
+      'Pickup vs Shipping':      `${pickupCount} / ${totalItems - pickupCount}`,
+      'Paid Rate':               `${((paidCount / totalItems) * 100).toFixed(1)}%`,
+      'Unpaid Invoices':         totalItems - paidCount,
+      'Top Category by Revenue': topCatByRev?.cat || '—',
+      'Top Category Revenue':    topCatByRev ? `$${topCatByRev.rev.toFixed(2)}` : '—',
+      'Top Category by Avg Price': topCatByAvg?.cat || '—',
+      'Top Avg Price':           topCatByAvg ? `$${topCatByAvg.avg.toFixed(2)}` : '—',
+    },
+    categories,
+    sales,
+    topItems,
+    monthly,
+  }
+}
+
+function exportDataCSV(D) {
+  const s = D.summary
+  const rows = [
+    ['CTBids Analytics Export', new Date().toLocaleDateString()],
+    [],
+    ['SUMMARY'],
+    ...Object.entries(s).map(([k, v]) => [k, v]),
+    [],
+    ['CATEGORIES'],
+    ['Category', 'Items Sold', 'Revenue', 'Avg Price', 'Median', 'Max', 'Avg Bids'],
+    ...D.categories.map(c => [c.cat, c.sold, c.rev.toFixed(2), c.avg.toFixed(2), c.median.toFixed(2), c.max, (c.bids || 0).toFixed(1)]),
+  ]
+  const csv = rows.map(r => r.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n')
+  const blob = new Blob([csv], { type: 'text/csv' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = `ctbids-analytics-${new Date().toISOString().slice(0, 10)}.csv`
+  a.click()
+  URL.revokeObjectURL(a.href)
+}
 
 const CT_DATA = {
   summary: {
@@ -203,6 +403,8 @@ const CT_DATA = {
   ],
 }
 
+// ── Shared UI primitives ────────────────────────────────────────
+
 const btnPrimary = {
   padding: '7px 13px', borderRadius: 10,
   background: 'var(--accent)', color: 'white',
@@ -227,7 +429,7 @@ function FilterChip({ label, active, onClick }) {
   )
 }
 
-function CTTab({ active, onClick, label, count, badge }) {
+function CTTab({ active, onClick, label, count, liveDot }) {
   return (
     <button onClick={onClick} style={{
       padding: '10px 4px', border: 'none', background: 'transparent', cursor: 'pointer',
@@ -238,6 +440,9 @@ function CTTab({ active, onClick, label, count, badge }) {
       marginRight: 18,
     }}>
       {label}
+      {liveDot && (
+        <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#2F7A55', display: 'inline-block', animation: 'livePulse 1.8s ease-in-out infinite' }} />
+      )}
       {count != null && (
         <span style={{
           fontSize: 11, fontWeight: 600,
@@ -246,152 +451,7 @@ function CTTab({ active, onClick, label, count, badge }) {
           padding: '1px 7px', borderRadius: 999,
         }}>{count}</span>
       )}
-      {badge && (
-        <span style={{
-          fontSize: 9.5, fontWeight: 700, letterSpacing: '0.04em',
-          color: '#7A5417', background: '#FFEFD9',
-          padding: '1px 6px', borderRadius: 4, textTransform: 'uppercase',
-        }}>{badge}</span>
-      )}
     </button>
-  )
-}
-
-function Panel({ title, subtitle, tone, children }) {
-  return (
-    <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 14, padding: 18, boxShadow: 'var(--shadow-1)' }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 14 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: '-0.005em' }}>{title}</div>
-        {subtitle && <div style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>{subtitle}</div>}
-        {tone === 'warn' && <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 600, color: 'var(--warn)', background: 'var(--warn-soft)', padding: '2px 8px', borderRadius: 999 }}>review</span>}
-      </div>
-      {children}
-    </div>
-  )
-}
-
-function StatBigMetric({ label, value, sub, accent }) {
-  return (
-    <div style={{
-      background: accent ? 'var(--accent-soft)' : 'var(--panel)',
-      border: '1px solid ' + (accent ? 'var(--accent-soft-2, var(--accent))' : 'var(--line)'),
-      borderRadius: 14, padding: '14px 16px', boxShadow: 'var(--shadow-1)',
-    }}>
-      <div style={{ fontSize: 10.5, color: accent ? 'var(--accent-ink)' : 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>{label}</div>
-      <div style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', marginTop: 3, color: accent ? 'var(--accent-ink)' : 'var(--ink-1)', fontVariantNumeric: 'tabular-nums' }}>{value}</div>
-      {sub && <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginTop: 2 }}>{sub}</div>}
-    </div>
-  )
-}
-
-function StatMini({ label, value, suffix }) {
-  return (
-    <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 12, padding: '12px 14px', boxShadow: 'var(--shadow-1)' }}>
-      <div style={{ fontSize: 10.5, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600, marginBottom: 4 }}>{label}</div>
-      <div style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>{value}</div>
-      {suffix && <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 1 }}>{suffix}</div>}
-    </div>
-  )
-}
-
-function CatBar({ cat, max, rank }) {
-  const pct = (cat.rev / max) * 100
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: '24px 1.3fr 80px 1.4fr 100px', gap: 10, alignItems: 'center' }}>
-      <span style={{ fontSize: 11, color: 'var(--ink-4)', fontWeight: 600, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{rank}</span>
-      <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cat.cat}</span>
-      <span style={{ fontSize: 11.5, color: 'var(--ink-3)', fontVariantNumeric: 'tabular-nums' }}>{cat.sold} items</span>
-      <div style={{ height: 10, background: 'var(--bg-2)', borderRadius: 3, overflow: 'hidden' }}>
-        <div style={{ height: '100%', width: `${pct}%`, background: 'linear-gradient(90deg, var(--accent) 0%, var(--accent-ink) 100%)', borderRadius: 3 }} />
-      </div>
-      <span style={{ fontSize: 12, fontWeight: 600, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>${Math.round(cat.rev).toLocaleString()}</span>
-    </div>
-  )
-}
-
-function CatRow({ cat, rank, metric, metricLabel, warn }) {
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: '20px 1fr 80px 80px', gap: 10, alignItems: 'center', padding: '7px 0', borderBottom: '1px dashed var(--line-2)' }}>
-      <span style={{ fontSize: 11, color: 'var(--ink-4)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{rank}</span>
-      <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cat.cat}</span>
-      <span style={{ fontSize: 11, color: 'var(--ink-3)', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{cat.sold} sold</span>
-      <span style={{ fontSize: 12, fontWeight: 600, textAlign: 'right', color: warn ? 'var(--warn)' : 'var(--win)', fontVariantNumeric: 'tabular-nums' }}>
-        {metric}<span style={{ fontWeight: 400, fontSize: 10, color: 'var(--ink-4)', marginLeft: 3 }}>{metricLabel}</span>
-      </span>
-    </div>
-  )
-}
-
-function InsightCard({ label, title, metric, icon, accent }) {
-  const tones = {
-    win:    { bg: 'var(--win-soft)',    fg: 'var(--win)' },
-    accent: { bg: 'var(--accent-soft)', fg: 'var(--accent-ink)' },
-    both:   { bg: 'var(--b-both-bg, var(--accent-soft))', fg: 'var(--b-both-fg, var(--accent-ink))' },
-  }
-  const t = tones[accent] || tones.accent
-  return (
-    <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 14, padding: '14px 16px', boxShadow: 'var(--shadow-1)', display: 'flex', alignItems: 'center', gap: 14 }}>
-      <div style={{ width: 40, height: 40, borderRadius: 12, background: t.bg, color: t.fg, display: 'grid', placeItems: 'center', flexShrink: 0 }}>{icon}</div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 10.5, color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>{label}</div>
-        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink-1)', marginTop: 2, letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</div>
-        {metric && <div style={{ fontSize: 11.5, color: 'var(--ink-3)', fontVariantNumeric: 'tabular-nums' }}>{metric}</div>}
-      </div>
-    </div>
-  )
-}
-
-function Legend({ color, label }) {
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-      <span style={{ width: 10, height: 10, borderRadius: 2, background: color }} />
-      {label}
-    </span>
-  )
-}
-
-function MonthlyChart({ rows }) {
-  if (!rows.length) return <div style={{ color: 'var(--ink-3)' }}>No data</div>
-  const max = Math.max(...rows.map(r => r.total))
-  return (
-    <div>
-      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${rows.length}, 1fr)`, gap: 6, alignItems: 'end', height: 180 }}>
-        {rows.map((r, i) => {
-          const totalH = max > 0 ? (r.total / max) * 160 : 0
-          const onlineH = r.total ? (r.online / r.total) * totalH : 0
-          const auctionH = r.total ? (r.auction / r.total) * totalH : 0
-          const bpH = r.total ? (r.bp / r.total) * totalH : 0
-          return (
-            <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-              <div style={{ fontSize: 10, color: 'var(--ink-4)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
-                {r.total ? `$${(r.total / 1000).toFixed(0)}k` : '—'}
-              </div>
-              <div style={{ width: '100%', maxWidth: 40, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: 160 }}>
-                {r.total > 0 ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', borderRadius: 4, overflow: 'hidden' }}>
-                    {bpH > 0 && <div style={{ height: bpH, background: 'var(--warn)' }} title={`BP $${Math.round(r.bp).toLocaleString()}`} />}
-                    {auctionH > 0 && <div style={{ height: auctionH, background: 'var(--accent-ink)' }} title={`In-person $${Math.round(r.auction).toLocaleString()}`} />}
-                    {onlineH > 0 && <div style={{ height: onlineH, background: 'var(--accent)' }} title={`Online $${Math.round(r.online).toLocaleString()}`} />}
-                  </div>
-                ) : (
-                  <div style={{ height: 2, background: 'var(--line)', borderRadius: 2 }} />
-                )}
-              </div>
-            </div>
-          )
-        })}
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${rows.length}, 1fr)`, gap: 6, marginTop: 8 }}>
-        {rows.map((r, i) => (
-          <div key={i} style={{ fontSize: 10.5, color: 'var(--ink-3)', textAlign: 'center', fontWeight: 500 }}>{r.label}</div>
-        ))}
-      </div>
-      <div style={{ display: 'flex', gap: 14, marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--line-2)', fontSize: 11, color: 'var(--ink-3)' }}>
-        <Legend color="var(--accent)" label="Online auction" />
-        <Legend color="var(--accent-ink)" label="In-person auction" />
-        <Legend color="var(--warn)" label="Buyer's premium" />
-      </div>
-    </div>
   )
 }
 
@@ -411,206 +471,224 @@ function Pill({ pct, alt }) {
   )
 }
 
-function SectionHeader({ title, subtitle }) {
+// ── Stat cards ────────────────────────────────────────────────
+
+function StatCard({ label, value, sub, valueColor }) {
   return (
-    <div style={{ marginBottom: 12 }}>
-      <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.01em' }}>{title}</div>
-      {subtitle && <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>{subtitle}</div>}
+    <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 14, padding: '14px 16px', boxShadow: 'var(--shadow-1)' }}>
+      <div style={{ fontSize: 10.5, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>{label}</div>
+      <div style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', marginTop: 3, color: valueColor || 'var(--ink-1)', fontVariantNumeric: 'tabular-nums' }}>{value}</div>
+      {sub && <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginTop: 2 }}>{sub}</div>}
     </div>
   )
 }
 
-function QuadrantCard({ title, subtitle, accent, accentBg, items, action, metric, secondary }) {
+function StatMini({ label, value, suffix }) {
   return (
-    <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 14, boxShadow: 'var(--shadow-1)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ padding: '14px 16px 12px', background: `color-mix(in oklab, ${accentBg} 30%, var(--panel))`, borderBottom: '1px solid var(--line-2)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 8, height: 8, borderRadius: '50%', background: accent }} />
-          <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink-1)', letterSpacing: '-0.01em' }}>{title}</span>
-          <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>· {items.length}</span>
-        </div>
-        <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginTop: 2 }}>{subtitle}</div>
-      </div>
-      <div style={{ padding: '4px 4px', flex: 1 }}>
-        {items.map((c, i) => (
-          <div key={c.cat} style={{ display: 'grid', gridTemplateColumns: '22px 1fr auto auto', gap: 10, padding: '8px 12px', alignItems: 'center', borderBottom: i < items.length - 1 ? '1px solid var(--line-2)' : 'none', fontSize: 12.5 }}>
-            <span style={{ fontSize: 11, color: 'var(--ink-4)', fontWeight: 600, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{i + 1}</span>
-            <span style={{ fontWeight: 600, color: 'var(--ink-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.cat}</span>
-            <span style={{ fontSize: 11, color: 'var(--ink-3)', fontVariantNumeric: 'tabular-nums' }}>{secondary(c)}</span>
-            <span style={{ fontSize: 12, fontWeight: 600, color: accent, fontVariantNumeric: 'tabular-nums' }}>{metric(c)}</span>
-          </div>
-        ))}
-      </div>
-      <div style={{ padding: '10px 16px', borderTop: '1px solid var(--line-2)', background: 'var(--bg-2)', fontSize: 11.5, color: 'var(--ink-2)', display: 'flex', alignItems: 'center', gap: 8 }}>
-        <ArrowRight size={12} strokeWidth={1.9} style={{ color: accent }} />
-        <span><b>Action:</b> {action}</span>
-      </div>
+    <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 12, padding: '12px 14px', boxShadow: 'var(--shadow-1)' }}>
+      <div style={{ fontSize: 10.5, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600, marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>{value}</div>
+      {suffix && <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 1 }}>{suffix}</div>}
     </div>
   )
 }
 
-function TrendRow({ icon, tint, fg, headline, detail }) {
-  return (
-    <div style={{ display: 'flex', gap: 12, padding: '12px 16px', background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 12, boxShadow: 'var(--shadow-1)', alignItems: 'flex-start' }}>
-      <div style={{ width: 28, height: 28, borderRadius: 8, background: tint, color: fg, display: 'grid', placeItems: 'center', flexShrink: 0 }}>{icon}</div>
-      <div style={{ flex: 1 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink-1)', letterSpacing: '-0.005em' }}>{headline}</div>
-        <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 3, lineHeight: 1.5 }}>{detail}</div>
-      </div>
-      <button style={{ padding: '4px 10px', borderRadius: 8, border: '1px solid var(--line)', background: 'var(--panel)', color: 'var(--ink-2)', fontSize: 11, fontWeight: 600, cursor: 'pointer', flexShrink: 0 }}>Investigate</button>
-    </div>
-  )
+// Compute the 4 stat cards from D
+function computeStatCards(D) {
+  // Card 1: Total Revenue
+  const totalRev = D.sales.reduce((s, r) => s + r.rev, 0)
+  const totalRevFmt = `$${Math.round(totalRev).toLocaleString()}`
+  const auctionCount = D.sales.length
+
+  // Card 2: Avg Sale Price + trend
+  const totalItems = D.sales.reduce((s, r) => s + r.items, 0)
+  const avgPrice = totalItems > 0 ? totalRev / totalItems : 0
+  let trendSub = 'across all auctions'
+  if (D.sales.length >= 6) {
+    const recent = D.sales.slice(-3)
+    const prev = D.sales.slice(-6, -3)
+    const recentAvg = recent.reduce((s, r) => s + r.avgPrice, 0) / 3
+    const prevAvg = prev.reduce((s, r) => s + r.avgPrice, 0) / 3
+    const diff = Math.round(recentAvg - prevAvg)
+    if (diff >= 0) trendSub = `↑ $${diff} vs prior 3 auctions`
+    else trendSub = `↓ $${Math.abs(diff)} vs prior 3 auctions`
+  }
+
+  // Card 3: Sell-Through Rate
+  const strRaw = D.summary['Sell-Through Rate'] || '—'
+  const strPct = parseFloat(strRaw) || 0
+  const strColor = strPct >= 90 ? 'var(--win)' : strPct >= 75 ? 'var(--warn)' : 'var(--lose)'
+  const soldCount = D.summary['Total Items Sold'] || 0
+  const listedCount = D.summary['Total Items Listed'] || 0
+
+  // Card 4: Profitable Lots — use category data
+  const totalSold = D.categories.reduce((s, c) => s + c.sold, 0)
+  const profitableSold = D.categories
+    .filter(c => (c.avg || 0) >= PROFIT_THRESHOLD)
+    .reduce((s, c) => s + c.sold, 0)
+  const profitPct = totalSold > 0 ? Math.round(profitableSold / totalSold * 100) : 0
+  const profitColor = profitPct > 70 ? 'var(--win)' : profitPct >= 50 ? 'var(--warn)' : 'var(--lose)'
+
+  return {
+    totalRevFmt, auctionCount,
+    avgPriceFmt: `$${Math.round(avgPrice)}`, trendSub,
+    strRaw, strColor, soldCount, listedCount,
+    profitPct, profitColor,
+  }
 }
 
-function OverviewTab({ D }) {
-  const s = D.summary
-  const topCats = [...D.categories].sort((a, b) => b.rev - a.rev).slice(0, 10)
-  const maxRev = topCats[0]?.rev || 1
-  const underPerf = D.categories.filter(c => c.sold >= 5 && c.avg).sort((a, b) => a.avg - b.avg).slice(0, 6)
-  const premium = D.categories.filter(c => c.sold >= 3 && c.avg).sort((a, b) => b.avg - a.avg).slice(0, 6)
-  const monthly = D.monthly.filter(m => m.month && m.year).map(m => ({
-    label: `${(m.month || '').slice(0, 3)} ${String(m.year).slice(-2)}`,
-    online: m.online || 0, auction: m.auction || 0, bp: m.bp || 0,
-    total: (m.online || 0) + (m.auction || 0) + (m.bp || 0),
+// ── Auctions Tab ───────────────────────────────────────────────
+
+function estProfitablePct(avgPrice) {
+  if (avgPrice >= 120) return { pct: 85, color: 'var(--win)' }
+  if (avgPrice >= 80)  return { pct: 70, color: 'var(--win)' }
+  if (avgPrice >= 60)  return { pct: 55, color: 'var(--warn)' }
+  return { pct: 35, color: 'var(--lose)' }
+}
+
+function AuctionsTab({ D }) {
+  const [expandedIdx, setExpandedIdx] = useState(null)
+  const sortedRows = [...D.sales].sort((a, b) => b.rev - a.rev)
+  const top15 = sortedRows.slice(0, 15)
+  const showing15 = sortedRows.length > 15
+
+  const totalRev = sortedRows.reduce((s, r) => s + r.rev, 0)
+  const totalItems = sortedRows.reduce((s, r) => s + r.items, 0)
+  const totalBP = sortedRows.reduce((s, r) => s + (r.bp || 0), 0)
+  const paidRows = sortedRows.filter(r => r.paidPct != null)
+  const avgPaid = paidRows.length ? paidRows.reduce((s, r) => s + r.paidPct, 0) / paidRows.length : 0
+
+  // Bar chart data
+  const chartData = top15.map(r => ({
+    name: r.title.replace(/ Online Auction.*$/, '').replace(/ - Ends.*$/, '').replace(/–.*$/, '').trim().slice(0, 32),
+    revenue: Math.round(r.rev),
+    avgPrice: r.avgPrice || 0,
   }))
 
+  function barColor(avgPrice) {
+    if (avgPrice >= 100) return '#2563EB'
+    if (avgPrice >= 60) return '#0891B2'
+    return '#D97706'
+  }
+
   return (
     <div style={{ padding: '0 28px 36px' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 16 }}>
-        <StatBigMetric label="Total Revenue" value={s['Total Revenue']} sub={`${(s['Total Items Sold'] || 0).toLocaleString()} items · ${s['Total Auctions'] || 0} auctions`} accent />
-        <StatBigMetric label="Sell-Through Rate" value={s['Sell-Through Rate']} sub={`${(s['Total Items Sold'] || 0).toLocaleString()} sold of ${(s['Total Items Listed'] || 0).toLocaleString()} listed`} />
-        <StatBigMetric label="Average Sale" value={s['Average Sale Price']} sub={`Median ${s['Median Sale Price']}`} />
-        <StatBigMetric label="Paid Rate" value={s['Paid Rate']} sub={`${s['Unpaid Invoices'] || 0} unpaid invoices`} />
+      {/* Stats */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 20 }}>
+        <StatMini label="Auctions Run" value={sortedRows.length} suffix="events" />
+        <StatMini label="Gross Revenue" value={`$${(totalRev / 1000).toFixed(0)}k`} suffix={`${totalItems.toLocaleString()} items`} />
+        <StatMini label="Avg Paid Rate" value={`${(avgPaid * 100).toFixed(0)}%`} suffix="across auctions" />
+        <StatMini label="Buyer's Premium" value={`$${(totalBP / 1000).toFixed(0)}k`} suffix="captured" />
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 22 }}>
-        <StatMini label="Buyer's Premium" value={s['Total Buyers Premium']} suffix="captured" />
-        <StatMini label="Avg Bids / Item" value={s['Average Bids per Item']} suffix="engagement" />
-        <StatMini label="Avg Views / Item" value={s['Average Views per Item']} suffix="impressions" />
-        <StatMini label="Pickup vs Ship" value={s['Pickup vs Shipping']} suffix="fulfillment" />
+
+      {/* Revenue bar chart */}
+      <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 14, padding: '16px', marginBottom: 20, boxShadow: 'var(--shadow-1)' }}>
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Revenue by Auction</div>
+        {showing15 && <div style={{ fontSize: 11.5, color: 'var(--ink-4)', marginBottom: 10 }}>Showing top 15 by revenue</div>}
+        <ResponsiveContainer width="100%" height={400}>
+          <BarChart data={chartData} layout="vertical" margin={{ left: 10, right: 60, top: 0, bottom: 0 }}>
+            <XAxis type="number" tickFormatter={v => `$${v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v}`} tick={{ fontSize: 11 }} />
+            <YAxis type="category" dataKey="name" width={200} tick={{ fontSize: 10.5 }} />
+            <Tooltip
+              formatter={(value) => [`$${value.toLocaleString()}`, 'Revenue']}
+              contentStyle={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, fontSize: 12 }}
+            />
+            <Bar dataKey="revenue" radius={[0, 4, 4, 0]} label={{ position: 'right', formatter: v => `$${(v / 1000).toFixed(0)}k`, fontSize: 10.5, fill: 'var(--ink-3)' }}>
+              {chartData.map((entry, index) => (
+                <Cell key={index} fill={barColor(entry.avgPrice)} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
       </div>
-      <Panel title="Monthly Auction Revenue" subtitle="Online + In-person + Buyer's Premium">
-        <MonthlyChart rows={monthly} />
-      </Panel>
-      <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 12, marginTop: 16 }}>
-        <Panel title="Top Categories by Revenue" subtitle="Where the money comes from">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {topCats.map((c, i) => <CatBar key={c.cat} cat={c} max={maxRev} rank={i + 1} />)}
+
+      {/* Table */}
+      <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 12, overflowX: 'auto' }}>
+        <div style={{ minWidth: 980 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '2.5fr 70px 110px 90px 110px 70px 70px', gap: 10, padding: '10px 16px', fontSize: 10.5, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600, borderBottom: '1px solid var(--line)', background: 'var(--bg-2)' }}>
+            <span>Auction</span><span>Items</span><span>Revenue</span><span>Avg Price</span><span>Est. Profitable</span><span>Paid</span><span>Pickup</span>
           </div>
-        </Panel>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <Panel title="Premium Categories" subtitle="Highest avg sale price">
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-              {premium.map((c, i) => <CatRow key={c.cat} cat={c} rank={i + 1} metric={`$${(c.avg || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} metricLabel="avg" />)}
-            </div>
-          </Panel>
-          <Panel title="Underperforming" subtitle="Avg sale under $35 · ≥5 items" tone="warn">
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-              {underPerf.map((c, i) => <CatRow key={c.cat} cat={c} rank={i + 1} metric={`$${(c.avg || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} metricLabel="avg" warn />)}
-            </div>
-          </Panel>
+          {sortedRows.map((r, i) => {
+            const name = r.title.replace(/ Online Auction.*$/, '').replace(/ - Ends.*$/, '').replace(/–.*$/, '').trim()
+            const ep = estProfitablePct(r.avgPrice || 0)
+            const isExpanded = expandedIdx === i
+            // Find matching items from D.topItems
+            const matchItems = (D.topItems || []).filter(it => {
+              const auc = (it.auction || '').toLowerCase()
+              const title = r.title.toLowerCase()
+              const shortTitle = name.toLowerCase()
+              return title.includes(auc) || shortTitle.includes(auc) || auc.includes(shortTitle.split(' ').slice(0, 3).join(' '))
+            }).sort((a, b) => b.price - a.price)
+            const aboveThreshold = matchItems.filter(it => it.price >= PROFIT_THRESHOLD)
+            const belowThreshold = matchItems.filter(it => it.price < PROFIT_THRESHOLD)
+
+            return (
+              <div key={i}>
+                <div
+                  onClick={() => setExpandedIdx(isExpanded ? null : i)}
+                  style={{ display: 'grid', gridTemplateColumns: '2.5fr 70px 110px 90px 110px 70px 70px', gap: 10, padding: '12px 16px', alignItems: 'center', fontSize: 12.5, borderBottom: '1px solid var(--line-2)', cursor: 'pointer' }}
+                  onMouseOver={e => e.currentTarget.style.background = 'var(--hover, var(--bg-2))'}
+                  onMouseOut={e => e.currentTarget.style.background = 'transparent'}
+                >
+                  <div style={{ overflow: 'hidden' }}>
+                    <div style={{ fontWeight: 600, color: 'var(--ink-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
+                    <div style={{ fontSize: 11, color: 'var(--ink-4)', fontVariantNumeric: 'tabular-nums' }}>Avg bids {(r.avgBids || 0).toFixed(1)} · BP ${Math.round(r.bp || 0).toLocaleString()}</div>
+                  </div>
+                  <span style={{ color: 'var(--ink-2)', fontVariantNumeric: 'tabular-nums' }}>{r.items}</span>
+                  <span style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>${Math.round(r.rev).toLocaleString()}</span>
+                  <span style={{ color: 'var(--ink-2)', fontVariantNumeric: 'tabular-nums' }}>${Math.round(r.avgPrice || 0)}</span>
+                  <span style={{ fontSize: 11.5, fontWeight: 600, color: ep.color, fontVariantNumeric: 'tabular-nums' }}>~{ep.pct}%</span>
+                  <Pill pct={r.paidPct} />
+                  <Pill pct={r.pickupPct} alt />
+                </div>
+                {isExpanded && (
+                  <div style={{ padding: '14px 20px', background: 'var(--bg-2)', borderBottom: '1px solid var(--line-2)' }}>
+                    {matchItems.length === 0 ? (
+                      <div style={{ fontSize: 12.5, color: 'var(--ink-4)' }}>No item-level data available for this auction.</div>
+                    ) : (
+                      <>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-2)', marginBottom: 10 }}>
+                          {aboveThreshold.length} items above ${PROFIT_THRESHOLD} · {belowThreshold.length} items below · avg ${Math.round(matchItems.reduce((s, it) => s + it.price, 0) / matchItems.length)}
+                        </div>
+                        {matchItems.map((it, j) => {
+                          const isThresholdLine = j > 0 && matchItems[j - 1].price >= PROFIT_THRESHOLD && it.price < PROFIT_THRESHOLD
+                          return (
+                            <div key={j}>
+                              {isThresholdLine && (
+                                <div style={{ borderTop: `1.5px dashed var(--lose)`, margin: '6px 0', position: 'relative' }}>
+                                  <span style={{ position: 'absolute', left: 0, top: -8, fontSize: 10, color: 'var(--lose)', background: 'var(--bg-2)', paddingRight: 6 }}>
+                                    — ${PROFIT_THRESHOLD} threshold —
+                                  </span>
+                                </div>
+                              )}
+                              <div style={{ display: 'grid', gridTemplateColumns: '2fr 100px 60px 90px', gap: 10, padding: '6px 0', fontSize: 12, alignItems: 'center' }}>
+                                <span style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.name}</span>
+                                <span style={{ fontWeight: 600, color: it.price >= PROFIT_THRESHOLD ? 'var(--win)' : 'var(--lose)', fontVariantNumeric: 'tabular-nums' }}>${it.price.toLocaleString()}</span>
+                                <span style={{ color: 'var(--ink-3)', fontVariantNumeric: 'tabular-nums' }}>{it.bids} bids</span>
+                                <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>{it.cat}</span>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginTop: 16 }}>
-        <InsightCard label="Top category by revenue" title={s['Top Category by Revenue']} metric={s['Top Category Revenue']} icon={<Star size={18} strokeWidth={1.8} />} accent="win" />
-        <InsightCard label="Highest avg price" title={s['Top Category by Avg Price']} metric={s['Top Avg Price'] ? `${s['Top Avg Price']} avg` : ''} icon={<TrendingUp size={18} strokeWidth={1.8} />} accent="accent" />
-        <InsightCard label="Highest single sale" title={D.topItems[0]?.name} metric={s['Highest Sale Price']} icon={<Gavel size={18} strokeWidth={1.8} />} accent="both" />
       </div>
     </div>
   )
 }
 
-function InsightsTab({ D }) {
-  const above60 = D.categories.filter(c => (c.avg || 0) >= 60 && c.sold >= 3)
-  const below60 = D.categories.filter(c => (c.avg || 0) < 60 && c.sold >= 3)
-  const above60Rev = above60.reduce((s, c) => s + c.rev, 0)
-  const below60Rev = below60.reduce((s, c) => s + c.rev, 0)
-  const above60Items = above60.reduce((s, c) => s + c.sold, 0)
-  const below60Items = below60.reduce((s, c) => s + c.sold, 0)
-  const totalRev = above60Rev + below60Rev
-  const totalItems = above60Items + below60Items
+// ── Categories Tab ─────────────────────────────────────────────
 
-  const winners = D.categories.filter(c => (c.avg || 0) >= 100 && (c.bids || 0) >= 15 && c.sold >= 4)
-    .sort((a, b) => (b.avg * Math.log(b.bids || 1)) - (a.avg * Math.log(a.bids || 1))).slice(0, 8)
-  const sleepers = D.categories.filter(c => (c.avg || 0) >= 75 && c.sold >= 3 && c.sold <= 12 && (c.bids || 0) >= 10)
-    .sort((a, b) => (b.avg || 0) - (a.avg || 0)).slice(0, 6)
-  const bundleCandidates = D.categories.filter(c => (c.avg || 0) < 40 && c.sold >= 10)
-    .sort((a, b) => b.sold - a.sold).slice(0, 6)
-  const donateCandidates = D.categories.filter(c => (c.avg || 0) < 30 && (c.bids || 0) < 15 && c.sold >= 3)
-    .sort((a, b) => (a.avg || 0) - (b.avg || 0)).slice(0, 6)
-
-  return (
-    <div style={{ padding: '0 28px 36px' }}>
-      <div style={{
-        background: 'color-mix(in oklab, var(--accent-soft) 55%, var(--panel))',
-        border: '1px solid color-mix(in oklab, var(--accent) 30%, var(--line))',
-        borderRadius: 14, padding: '16px 18px', marginBottom: 22,
-        display: 'flex', gap: 14, alignItems: 'flex-start',
-      }}>
-        <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--accent)', color: 'white', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
-          <Sparkles size={17} strokeWidth={1.9} />
-        </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 13.5, fontWeight: 600, letterSpacing: '-0.01em', marginBottom: 3 }}>This quarter's listing strategy, at a glance</div>
-          <div style={{ fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.55 }}>
-            <b>{Math.round(above60Items / totalItems * 100)}%</b> of items sold above the $60 listing threshold generated <b>{Math.round(above60Rev / totalRev * 100)}%</b> of revenue.
-            Prioritize <b>{winners[0]?.cat}</b>, <b>{winners[1]?.cat}</b>, and <b>{winners[2]?.cat}</b> —
-            these categories averaged <span style={{ fontVariantNumeric: 'tabular-nums' }}>${Math.round(((winners[0]?.avg || 0) + (winners[1]?.avg || 0) + (winners[2]?.avg || 0)) / 3)}</span> per item.
-            Consider bundling low-avg categories like <b>{bundleCandidates[0]?.cat}</b> and donating <b>{donateCandidates[0]?.cat}</b>.
-          </div>
-        </div>
-        <button style={btnGhost}><Download size={12} strokeWidth={1.9} /> Export brief</button>
-      </div>
-
-      <SectionHeader title="$60 listing threshold analysis" subtitle="Items averaging below $60 typically underperform listing effort once fees + time are factored in" />
-      <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 14, overflow: 'hidden', boxShadow: 'var(--shadow-1)', marginBottom: 28 }}>
-        <div style={{ padding: '18px 20px 14px' }}>
-          <div style={{ display: 'flex', gap: 2, height: 44, borderRadius: 10, overflow: 'hidden' }}>
-            <div style={{ flex: above60Items, background: '#2F7A55', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11.5, fontWeight: 600 }}>
-              ≥ $60 · <span style={{ fontVariantNumeric: 'tabular-nums', marginLeft: 4 }}>{above60Items.toLocaleString()}</span> items ({Math.round(above60Items / totalItems * 100)}%)
-            </div>
-            <div style={{ flex: below60Items, background: '#C8A14A', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11.5, fontWeight: 600 }}>
-              &lt; $60 · <span style={{ fontVariantNumeric: 'tabular-nums', marginLeft: 4 }}>{below60Items.toLocaleString()}</span> ({Math.round(below60Items / totalItems * 100)}%)
-            </div>
-          </div>
-          <div style={{ fontSize: 10.5, color: 'var(--ink-4)', textAlign: 'center', marginTop: 6 }}>Items sold, split by category average</div>
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', borderTop: '1px solid var(--line-2)' }}>
-          <div style={{ padding: '16px 20px', borderRight: '1px solid var(--line-2)' }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: '#2F7A55', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Above threshold</div>
-            <div style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>${Math.round(above60Rev).toLocaleString()}</div>
-            <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginTop: 2 }}>{Math.round(above60Rev / totalRev * 100)}% of revenue · {above60.length} categories</div>
-            <div style={{ fontSize: 11.5, color: 'var(--ink-2)', marginTop: 10, lineHeight: 1.5 }}><b>Strategy:</b> list individually, photograph well, lead auction previews with these items.</div>
-          </div>
-          <div style={{ padding: '16px 20px' }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: '#7A5417', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Below threshold</div>
-            <div style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>${Math.round(below60Rev).toLocaleString()}</div>
-            <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginTop: 2 }}>{Math.round(below60Rev / totalRev * 100)}% of revenue · {below60.length} categories · <span style={{ fontVariantNumeric: 'tabular-nums' }}>{below60Items.toLocaleString()}</span> items</div>
-            <div style={{ fontSize: 11.5, color: 'var(--ink-2)', marginTop: 10, lineHeight: 1.5 }}><b>Strategy:</b> bundle into mixed lots of 5–10 items, or route to in-person estate sale where per-item effort is minimal.</div>
-          </div>
-        </div>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 28 }}>
-        <QuadrantCard kind="winners" title="Winners" subtitle="High avg price + strong bid engagement" accent="#2F7A55" accentBg="#E3EEE8" items={winners} action="List individually, photograph well" metric={(c) => `$${Math.round(c.avg)} avg`} secondary={(c) => `${Math.round(c.bids)} bids / item`} />
-        <QuadrantCard kind="sleepers" title="Sleepers" subtitle="Under-the-radar categories worth pushing" accent="#3E5C86" accentBg="#E4ECF6" items={sleepers} action="Increase sourcing + catalog placement" metric={(c) => `$${Math.round(c.avg)} avg`} secondary={(c) => `only ${c.sold} sold`} />
-        <QuadrantCard kind="bundles" title="Bundle candidates" subtitle="Low-avg but high-volume — combine into lots" accent="#7A5417" accentBg="#F5ECD6" items={bundleCandidates} action="Group into 5–10 item mixed lots" metric={(c) => `$${Math.round(c.avg)} avg`} secondary={(c) => `${c.sold} items sold`} />
-        <QuadrantCard kind="donate" title="Donate / decline" subtitle="Low avg + low engagement — not worth listing" accent="#A14646" accentBg="#F1E1E1" items={donateCandidates} action="Route to donation partner, skip listing" metric={(c) => `$${Math.round(c.avg)} avg`} secondary={(c) => `${Math.round(c.bids)} bids / item`} />
-      </div>
-
-      <SectionHeader title="Pattern detector" subtitle="Automated trend callouts from the last 6 auctions" />
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <TrendRow icon={<TrendingUp size={14} strokeWidth={2} />} tint="#E3EEE8" fg="#2F7A55" headline="Fine Jewelry up 34% over last quarter" detail="Avg price climbed from $228 → $306. 18 of last 22 pieces exceeded estimate. Consider a dedicated jewelry-only auction." />
-        <TrendRow icon={<AlertTriangle size={14} strokeWidth={2} />} tint="#F5ECD6" fg="#7A5417" headline="Flatware: steady decline in avg bid" detail="Avg bids dropped from 22 → 11 over 3 months. Likely buyer fatigue — pause listings for 6 weeks or bundle." />
-        <TrendRow icon={<Sparkles size={14} strokeWidth={2} />} tint="#ECE6F4" fg="#5C3F88" headline="New demand signal: mid-century lighting" detail="First 8 MCM lamps averaged $187 with 24+ bids. Flag for sourcing during intake. Cross-reference estate catalogs." />
-        <TrendRow icon={<TrendingUp size={14} strokeWidth={2} />} tint="#ECEEF2" fg="#3E5C86" headline="Weekday ending auctions outperform weekend by 11%" detail="Tuesday 8pm close → avg $142. Saturday 8pm close → avg $128. Prefer weekday close for high-value items." />
-      </div>
-    </div>
-  )
-}
-
-function CategoriesTab({ D }) {
+function CategoriesTab({ D, onSwitchToItems, onFilterItems }) {
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState('rev')
+  const [expandedCat, setExpandedCat] = useState(null)
 
   const rows = useMemo(() => {
     let list = D.categories.filter(c => c.sold >= 1)
@@ -629,7 +707,22 @@ function CategoriesTab({ D }) {
     return list
   }, [D.categories, query, sort])
 
-  const maxRev = rows[0]?.rev || 1
+  const maxRev = D.categories[0]?.rev || 1
+
+  function getRecommendation(c) {
+    if ((c.avg || 0) > 200 && (c.bids || 0) > 5) return { text: '⬆ List more', color: 'var(--win)' }
+    if ((c.avg || 0) >= 100 && (c.bids || 0) > 3) return { text: '✓ Strong', color: 'var(--win)' }
+    if ((c.avg || 0) >= PROFIT_THRESHOLD) return { text: '→ Good', color: 'var(--ink-2)' }
+    if ((c.avg || 0) >= 30) return { text: '⚠ Bundle', color: 'var(--warn)' }
+    return { text: '✗ Avoid', color: 'var(--lose)' }
+  }
+
+  function rowBg(c) {
+    if ((c.avg || 0) > 200) return 'rgba(74, 222, 128, 0.08)'
+    if ((c.avg || 0) >= PROFIT_THRESHOLD) return 'transparent'
+    if ((c.avg || 0) >= 30) return 'rgba(251, 191, 36, 0.08)'
+    return 'rgba(248, 113, 113, 0.08)'
+  }
 
   return (
     <div style={{ padding: '0 28px 36px' }}>
@@ -647,32 +740,79 @@ function CategoriesTab({ D }) {
         </select>
       </div>
       <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 12, overflowX: 'auto' }}>
-        <div style={{ minWidth: 960 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 70px 110px 80px 80px 80px 70px 1.4fr', padding: '10px 16px', fontSize: 10.5, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600, borderBottom: '1px solid var(--line)', background: 'var(--bg-2)', gap: 10 }}>
-            <span>Category</span><span>Sold</span><span>Revenue</span><span>Avg</span><span>Median</span><span>Max</span><span>Bids</span><span>Share of revenue</span>
+        <div style={{ minWidth: 1080 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 70px 110px 80px 80px 80px 70px 80px 120px 1.1fr', padding: '10px 16px', fontSize: 10.5, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600, borderBottom: '1px solid var(--line)', background: 'var(--bg-2)', gap: 10 }}>
+            <span>Category</span><span>Sold</span><span>Revenue</span><span>Avg</span><span>Median</span><span>Max</span><span>Bids</span><span>Profitable?</span><span>Recommendation</span><span>Share of revenue</span>
           </div>
           {rows.slice(0, 100).map((c, i) => {
             const pct = c.pctRev ? c.pctRev * 100 : (c.rev / maxRev * 100 * 0.09)
+            const rec = getRecommendation(c)
+            const isProfitable = (c.avg || 0) >= PROFIT_THRESHOLD
+            const isExpanded = expandedCat === c.cat
+            const catItems = (D.topItems || []).filter(it => it.cat === c.cat).sort((a, b) => b.price - a.price)
+            const catAbove = catItems.filter(it => it.price >= 200).length
+            const catMid = catItems.filter(it => it.price >= PROFIT_THRESHOLD && it.price < 200).length
+            const catBelow = catItems.filter(it => it.price < PROFIT_THRESHOLD).length
+            const catTotal = catItems.length
+
             return (
-              <div key={c.cat} style={{ display: 'grid', gridTemplateColumns: '1.6fr 70px 110px 80px 80px 80px 70px 1.4fr', padding: '10px 16px', alignItems: 'center', fontSize: 12.5, borderBottom: i < rows.length - 1 ? '1px solid var(--line-2)' : 'none', gap: 10 }}
-                onMouseOver={e => e.currentTarget.style.background = 'var(--bg-2)'}
-                onMouseOut={e => e.currentTarget.style.background = 'transparent'}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
-                  <span style={{ width: 24, textAlign: 'right', fontSize: 11, color: 'var(--ink-4)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{i + 1}</span>
-                  <span style={{ fontWeight: 600, color: 'var(--ink-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.cat}</span>
-                </div>
-                <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--ink-2)' }}>{c.sold}</span>
-                <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>${Math.round(c.rev).toLocaleString()}</span>
-                <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--ink-2)' }}>${(c.avg || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-                <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--ink-3)' }}>${(c.median || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-                <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--ink-3)' }}>${(c.max || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-                <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--ink-3)' }}>{(c.bids || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ flex: 1, height: 6, background: 'var(--bg-2)', borderRadius: 3, overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: `${Math.min(100, c.rev / maxRev * 100)}%`, background: 'var(--accent)', borderRadius: 3 }} />
+              <div key={c.cat}>
+                <div
+                  onClick={() => setExpandedCat(isExpanded ? null : c.cat)}
+                  style={{ display: 'grid', gridTemplateColumns: '1.6fr 70px 110px 80px 80px 80px 70px 80px 120px 1.1fr', padding: '10px 16px', alignItems: 'center', fontSize: 12.5, borderBottom: '1px solid var(--line-2)', gap: 10, background: rowBg(c), cursor: 'pointer' }}
+                  onMouseOver={e => e.currentTarget.style.opacity = '0.85'}
+                  onMouseOut={e => e.currentTarget.style.opacity = '1'}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
+                    <span style={{ width: 24, textAlign: 'right', fontSize: 11, color: 'var(--ink-4)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{i + 1}</span>
+                    <span style={{ fontWeight: 600, color: 'var(--ink-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.cat}</span>
                   </div>
-                  <span style={{ fontSize: 11, color: 'var(--ink-3)', minWidth: 40, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{pct.toFixed(1)}%</span>
+                  <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--ink-2)' }}>{c.sold}</span>
+                  <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>${Math.round(c.rev).toLocaleString()}</span>
+                  <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--ink-2)' }}>${(c.avg || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                  <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--ink-3)' }}>${(c.median || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                  <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--ink-3)' }}>${(c.max || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                  <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--ink-3)' }}>{(c.bids || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: isProfitable ? 'var(--win)' : 'var(--lose)' }}>{isProfitable ? '✓' : '✗'}</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: rec.color }}>{rec.text}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ flex: 1, height: 6, background: 'var(--bg-2)', borderRadius: 3, overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${Math.min(100, c.rev / maxRev * 100)}%`, background: 'var(--accent)', borderRadius: 3 }} />
+                    </div>
+                    <span style={{ fontSize: 11, color: 'var(--ink-3)', minWidth: 40, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{pct.toFixed(1)}%</span>
+                  </div>
                 </div>
+                {isExpanded && (
+                  <div style={{ padding: '14px 20px', background: 'var(--bg-2)', borderBottom: '1px solid var(--line-2)' }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 10 }}>{c.cat} — {c.sold} items sold</div>
+                    {catItems.length === 0 ? (
+                      <div style={{ fontSize: 12, color: 'var(--ink-4)' }}>No item data available</div>
+                    ) : (
+                      <>
+                        {catItems.slice(0, 5).map((it, j) => (
+                          <div key={j} style={{ display: 'grid', gridTemplateColumns: '2fr 100px 60px', gap: 10, padding: '5px 0', fontSize: 12, alignItems: 'center' }}>
+                            <span style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.name}</span>
+                            <span style={{ fontWeight: 600, color: it.price >= PROFIT_THRESHOLD ? 'var(--win)' : 'var(--lose)', fontVariantNumeric: 'tabular-nums' }}>${it.price.toLocaleString()}</span>
+                            <span style={{ color: 'var(--ink-3)', fontVariantNumeric: 'tabular-nums' }}>{it.bids} bids</span>
+                          </div>
+                        ))}
+                        {catTotal > 0 && (
+                          <div style={{ marginTop: 10, fontSize: 11.5, color: 'var(--ink-3)', lineHeight: 1.7 }}>
+                            <div>Above $200: {catAbove} items {catTotal > 0 ? `(${Math.round(catAbove / catTotal * 100)}%)` : ''}</div>
+                            <div>$60–$200: {catMid} items {catTotal > 0 ? `(${Math.round(catMid / catTotal * 100)}%)` : ''}</div>
+                            <div>Below $60: {catBelow} items {catTotal > 0 ? `(${Math.round(catBelow / catTotal * 100)}%)` : ''}</div>
+                          </div>
+                        )}
+                        <button
+                          onClick={e => { e.stopPropagation(); onFilterItems(c.cat); onSwitchToItems() }}
+                          style={{ marginTop: 10, fontSize: 12, color: 'var(--accent-ink)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontWeight: 600 }}
+                        >
+                          View all items →
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
             )
           })}
@@ -683,22 +823,59 @@ function CategoriesTab({ D }) {
   )
 }
 
-function TopItemsTab({ D }) {
+// ── Items Tab ──────────────────────────────────────────────────
+
+function ItemsTab({ D, categoryFilter, onClearFilter }) {
   const [query, setQuery] = useState('')
   const [method, setMethod] = useState('all')
+  const [filter, setFilter] = useState('all')
 
   const rows = useMemo(() => {
     let list = D.topItems
+    // Apply category filter from drill-down
+    if (categoryFilter) {
+      list = list.filter(i => i.cat === categoryFilter)
+    }
+    // Apply price/engagement filter
+    if (filter === 'high') list = list.filter(i => i.price >= 200)
+    else if (filter === 'profitable') list = list.filter(i => i.price >= PROFIT_THRESHOLD)
+    else if (filter === 'below') list = list.filter(i => i.price < PROFIT_THRESHOLD)
+    else if (filter === 'mostbids') list = [...list].sort((a, b) => (b.bids || 0) - (a.bids || 0))
+    // Method filter
     if (method !== 'all') list = list.filter(i => (i.method || '').toLowerCase() === method)
+    // Search
     if (query) {
       const q = query.toLowerCase()
       list = list.filter(i => i.name.toLowerCase().includes(q) || (i.cat || '').toLowerCase().includes(q))
     }
     return list
-  }, [D.topItems, query, method])
+  }, [D.topItems, query, method, filter, categoryFilter])
 
   return (
     <div style={{ padding: '0 28px 36px' }}>
+      {/* Category filter banner */}
+      {categoryFilter && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, padding: '8px 12px', background: 'var(--accent-soft)', borderRadius: 10, fontSize: 12.5 }}>
+          <span style={{ color: 'var(--accent-ink)', fontWeight: 600 }}>Filtered: {categoryFilter}</span>
+          <button onClick={onClearFilter} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-3)', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
+            <X size={12} /> Clear filter
+          </button>
+        </div>
+      )}
+
+      {/* Filter pills */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
+        {[
+          { key: 'all', label: 'All' },
+          { key: 'high', label: 'High Value ($200+)' },
+          { key: 'profitable', label: `Profitable ($${PROFIT_THRESHOLD}+)` },
+          { key: 'below', label: `Below Threshold (<$${PROFIT_THRESHOLD})` },
+          { key: 'mostbids', label: 'Most Bids' },
+        ].map(({ key, label }) => (
+          <FilterChip key={key} label={label} active={filter === key} onClick={() => setFilter(key)} />
+        ))}
+      </div>
+
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, padding: '6px 10px', minWidth: 240 }}>
           <Search size={13} strokeWidth={1.8} color="var(--ink-4)" />
@@ -721,7 +898,10 @@ function TopItemsTab({ D }) {
                 <div style={{ fontSize: 11, color: 'var(--ink-4)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.auction}</div>
               </div>
               <span style={{ fontSize: 11.5, color: 'var(--ink-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.cat}</span>
-              <span style={{ fontWeight: 600, color: 'var(--win)', fontVariantNumeric: 'tabular-nums' }}>${it.price.toLocaleString()}</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+                <span style={{ fontSize: 8, color: it.price >= PROFIT_THRESHOLD ? 'var(--win)' : 'var(--lose)' }}>●</span>
+                <span style={{ color: it.price >= PROFIT_THRESHOLD ? 'var(--win)' : 'var(--ink-2)' }}>${it.price.toLocaleString()}</span>
+              </span>
               <span style={{ color: 'var(--ink-2)', fontVariantNumeric: 'tabular-nums' }}>{it.bids}</span>
               <span style={{ color: 'var(--ink-3)', fontVariantNumeric: 'tabular-nums' }}>{it.views}</span>
               <span style={{ fontSize: 10.5, fontWeight: 600, padding: '2px 8px', borderRadius: 999, background: it.method === 'pickup' ? 'var(--b-auction-bg, var(--warn-soft))' : 'var(--b-both-bg, var(--accent-soft))', color: it.method === 'pickup' ? 'var(--b-auction-fg, var(--warn))' : 'var(--b-both-fg, var(--accent-ink))', textTransform: 'capitalize', justifySelf: 'start' }}>
@@ -735,85 +915,164 @@ function TopItemsTab({ D }) {
   )
 }
 
-function AuctionsTab({ D }) {
-  const rows = [...D.sales].sort((a, b) => b.rev - a.rev)
-  const totalRev = rows.reduce((s, r) => s + r.rev, 0)
-  const totalItems = rows.reduce((s, r) => s + r.items, 0)
-  const totalBP = rows.reduce((s, r) => s + (r.bp || 0), 0)
-  const paidRows = rows.filter(r => r.paidPct != null)
-  const avgPaid = paidRows.length ? paidRows.reduce((s, r) => s + r.paidPct, 0) / paidRows.length : 0
-
-  return (
-    <div style={{ padding: '0 28px 36px' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 16 }}>
-        <StatMini label="Auctions Run" value={rows.length} suffix="events" />
-        <StatMini label="Gross Revenue" value={`$${(totalRev / 1000).toFixed(0)}k`} suffix={`${totalItems.toLocaleString()} items`} />
-        <StatMini label="Avg Paid Rate" value={`${(avgPaid * 100).toFixed(0)}%`} suffix="across auctions" />
-        <StatMini label="Buyer's Premium" value={`$${(totalBP / 1000).toFixed(0)}k`} suffix="captured" />
-      </div>
-      <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 12, overflowX: 'auto' }}>
-        <div style={{ minWidth: 860 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '2.5fr 70px 110px 90px 100px 70px 70px', gap: 10, padding: '10px 16px', fontSize: 10.5, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600, borderBottom: '1px solid var(--line)', background: 'var(--bg-2)' }}>
-            <span>Auction</span><span>Items</span><span>Revenue</span><span>Avg Price</span><span>Max Price</span><span>Paid</span><span>Pickup</span>
-          </div>
-          {rows.map((r, i) => {
-            const name = r.title.replace(/ Online Auction.*$/, '').replace(/ - Ends.*$/, '').replace(/–.*$/, '').trim()
-            return (
-              <div key={i} style={{ display: 'grid', gridTemplateColumns: '2.5fr 70px 110px 90px 100px 70px 70px', gap: 10, padding: '12px 16px', alignItems: 'center', fontSize: 12.5, borderBottom: i < rows.length - 1 ? '1px solid var(--line-2)' : 'none' }}
-                onMouseOver={e => e.currentTarget.style.background = 'var(--bg-2)'}
-                onMouseOut={e => e.currentTarget.style.background = 'transparent'}>
-                <div style={{ overflow: 'hidden' }}>
-                  <div style={{ fontWeight: 600, color: 'var(--ink-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
-                  <div style={{ fontSize: 11, color: 'var(--ink-4)', fontVariantNumeric: 'tabular-nums' }}>Avg bids {(r.avgBids || 0).toFixed(1)} · BP ${Math.round(r.bp || 0).toLocaleString()}</div>
-                </div>
-                <span style={{ color: 'var(--ink-2)', fontVariantNumeric: 'tabular-nums' }}>{r.items}</span>
-                <span style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>${Math.round(r.rev).toLocaleString()}</span>
-                <span style={{ color: 'var(--ink-2)', fontVariantNumeric: 'tabular-nums' }}>${Math.round(r.avgPrice || 0).toLocaleString()}</span>
-                <span style={{ color: 'var(--ink-3)', fontVariantNumeric: 'tabular-nums' }}>${Math.round(r.maxPrice || 0).toLocaleString()}</span>
-                <Pill pct={r.paidPct} />
-                <Pill pct={r.pickupPct} alt />
-              </div>
-            )
-          })}
-        </div>
-      </div>
-    </div>
-  )
-}
+// ── Main page ──────────────────────────────────────────────────
 
 export default function CTBids() {
-  const [tab, setTab] = useState('overview')
-  const D = CT_DATA
+  const [tab, setTab] = useState('auctions') // default; may switch to 'live' after Supabase check
+  const [hasActiveLive, setHasActiveLive] = useState(false)
+  const [importedData, setImportedData] = useState(() => loadImport())
+  const [importError, setImportError] = useState(null)
+  const [categoryFilter, setCategoryFilter] = useState(null)
+  const fileRef = useRef(null)
+
+  const D = importedData || CT_DATA
+
+  // Check for active auction on mount
+  useEffect(() => {
+    supabase
+      .from('ctbids_live_summary')
+      .select('id')
+      .eq('is_active', true)
+      .limit(1)
+      .then(({ data }) => {
+        if (data?.length > 0) {
+          setHasActiveLive(true)
+          setTab('live')
+        }
+      })
+      .catch(() => {})
+  }, [])
+
+  // Stat card computation
+  const stats = useMemo(() => computeStatCards(D), [D])
+
+  function handleImport(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      try {
+        const parsed = parseCTSellerCSV(ev.target.result)
+        saveImport(parsed)
+        setImportedData(parsed)
+        setImportError(null)
+      } catch (err) {
+        setImportError(err.message || 'Failed to parse CSV')
+      }
+    }
+    reader.readAsText(file)
+  }
+
+  function handleClearImport() {
+    clearImport()
+    setImportedData(null)
+    setImportError(null)
+  }
+
+  function handleGenerateReport() {
+    window.print()
+  }
 
   return (
     <div style={{ flex: 1, overflowY: 'auto' }}>
+      <style>{`
+        @keyframes livePulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.4; transform: scale(1.35); }
+        }
+      `}</style>
+
+      {/* Hidden file input */}
+      <input ref={fileRef} type="file" accept=".csv,.txt" style={{ display: 'none' }} onChange={handleImport} />
+
       {/* Page header */}
       <div style={{ padding: '22px 28px 16px', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
         <div style={{ flex: 1 }}>
           <h1 style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.02em', margin: 0, color: 'var(--ink-1)' }}>CTBids Analytics</h1>
-          <p style={{ fontSize: 12.5, color: 'var(--ink-3)', margin: '3px 0 0' }}>Online & in-person auction sales performance — pulled from consolidated export</p>
+          <p style={{ fontSize: 12.5, color: 'var(--ink-3)', margin: '3px 0 0' }}>
+            {importedData
+              ? `${importedData._imported?.itemCount?.toLocaleString() ?? '?'} items · imported ${importedData._imported?.date ?? ''}`
+              : 'Sample data — import a CTSeller CSV export to see your real numbers'}
+          </p>
+          {importedData && (
+            <button onClick={handleClearImport} title="Remove imported data and revert to sample" style={{ marginTop: 6, display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--ink-3)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+              <X size={11} strokeWidth={2} /> Reset to sample data
+            </button>
+          )}
+          {importError && (
+            <div style={{ marginTop: 6, fontSize: 11.5, color: 'var(--lose)', display: 'flex', alignItems: 'center', gap: 5 }}>
+              <AlertTriangle size={12} strokeWidth={2} /> {importError}
+            </div>
+          )}
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
-          <button style={btnGhost}>Export CSV</button>
-          <button style={btnGhost}><Download size={13} strokeWidth={1.8} /> Import data</button>
-          <button style={btnPrimary}><Sparkles size={14} strokeWidth={2} /> Generate report</button>
+          <button onClick={() => exportDataCSV(D)} style={btnGhost}><Download size={13} strokeWidth={1.8} /> Export CSV</button>
+          <button onClick={() => fileRef.current?.click()} style={btnGhost}><Upload size={13} strokeWidth={1.8} /> Import data</button>
+          <button onClick={handleGenerateReport} style={btnPrimary}><Sparkles size={14} strokeWidth={2} /> Generate report</button>
         </div>
       </div>
 
+      {/* Stat cards — shown on non-live tabs */}
+      {tab !== 'live' && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, padding: '16px 28px 0' }}>
+          <StatCard
+            label="Total Revenue"
+            value={stats.totalRevFmt}
+            sub={`from ${stats.auctionCount} auctions`}
+          />
+          <StatCard
+            label="Avg Sale Price"
+            value={stats.avgPriceFmt}
+            sub={stats.trendSub}
+          />
+          <StatCard
+            label="Sell-Through Rate"
+            value={stats.strRaw}
+            valueColor={stats.strColor}
+            sub={`${(stats.soldCount || 0).toLocaleString()} sold of ${(stats.listedCount || 0).toLocaleString()} listed`}
+          />
+          <StatCard
+            label="Profitable Lots"
+            value={`${stats.profitPct}%`}
+            valueColor={stats.profitColor}
+            sub={`above $${PROFIT_THRESHOLD} threshold`}
+          />
+        </div>
+      )}
+
       {/* Tabs */}
-      <div style={{ padding: '0 28px', borderBottom: '1px solid var(--line)', marginBottom: 22, display: 'flex', gap: 4 }}>
-        <CTTab active={tab === 'overview'} onClick={() => setTab('overview')} label="Overview" />
-        <CTTab active={tab === 'insights'} onClick={() => setTab('insights')} label="Insights" badge="new" />
-        <CTTab active={tab === 'categories'} onClick={() => setTab('categories')} label="Categories" count={D.categories.length} />
-        <CTTab active={tab === 'items'} onClick={() => setTab('items')} label="Top Items" count={D.topItems.length} />
+      <div style={{ padding: '16px 28px 0', borderBottom: '1px solid var(--line)', marginBottom: 22, display: 'flex', gap: 4 }}>
+        <CTTab active={tab === 'live'} onClick={() => setTab('live')} label="Live Auction" liveDot={hasActiveLive} />
         <CTTab active={tab === 'auctions'} onClick={() => setTab('auctions')} label="Auctions" count={D.sales.length} />
+        <CTTab active={tab === 'categories'} onClick={() => setTab('categories')} label="Categories" count={D.categories.length} />
+        <CTTab active={tab === 'items'} onClick={() => setTab('items')} label="Items" count={D.topItems.length} />
+        <CTTab active={tab === 'intelligence'} onClick={() => setTab('intelligence')} label="Intelligence" />
       </div>
 
-      {tab === 'overview' && <OverviewTab D={D} />}
-      {tab === 'insights' && <InsightsTab D={D} />}
-      {tab === 'categories' && <CategoriesTab D={D} />}
-      {tab === 'items' && <TopItemsTab D={D} />}
+      {tab === 'live' && (
+        <CTBidsLiveTab
+          PROFIT_THRESHOLD={PROFIT_THRESHOLD}
+          D={D}
+          onSwitchTab={setTab}
+        />
+      )}
       {tab === 'auctions' && <AuctionsTab D={D} />}
+      {tab === 'categories' && (
+        <CategoriesTab
+          D={D}
+          onSwitchToItems={() => setTab('items')}
+          onFilterItems={cat => setCategoryFilter(cat)}
+        />
+      )}
+      {tab === 'items' && (
+        <ItemsTab
+          D={D}
+          categoryFilter={categoryFilter}
+          onClearFilter={() => setCategoryFilter(null)}
+        />
+      )}
+      {tab === 'intelligence' && <CTBidsIntelligenceTab D={D} />}
     </div>
   )
 }

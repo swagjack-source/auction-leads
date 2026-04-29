@@ -30,16 +30,17 @@ describe('getSizeBucket', () => {
 // ── estimateLabourHours ────────────────────────────────────────
 describe('estimateLabourHours', () => {
   it('returns base hours for small/low at bucket minimum', () => {
-    // At sqft=0 ratio is 0, so base * 1.0 = 40
+    // LABOUR_HOURS.Small.Low = 16 (calibrated from CT Denver SE real job data, 2025-2026)
+    // At sqft=0 ratio is 0, so base * 1.0 = 16
     const hours = estimateLabourHours(0, 'Low')
-    expect(hours).toBe(40)
+    expect(hours).toBe(16)
   })
 
   it('returns ~20% more at top of bucket', () => {
-    // At sqft=1499 (near top of Small), should be close to 40 * 1.2 = 48
+    // At sqft=1499 (near top of Small), should be close to 16 * 1.2 = 19.2 → 19
     const hours = estimateLabourHours(1499, 'Low')
-    expect(hours).toBeGreaterThan(44)
-    expect(hours).toBeLessThanOrEqual(48)
+    expect(hours).toBeGreaterThan(17)
+    expect(hours).toBeLessThanOrEqual(20)
   })
 
   it('returns higher hours for higher density', () => {
@@ -81,9 +82,11 @@ describe('calculateDeal', () => {
     expect(result.size).toBe('Medium')
   })
 
-  it('overhead is 20% of labour cost', () => {
+  it('overhead is 30% of labour cost', () => {
+    // OVERHEAD_PCT updated to 0.30 based on CT Denver SE P&L actuals
+    // (fuel, supplies, disposal, insurance avg 30% — Cathy Redeker 35%, Kim Valentine 23%)
     const result = calculateDeal(base)
-    expect(result.overheadCost).toBe(Math.round(result.labourCost * 0.2))
+    expect(result.overheadCost).toBe(Math.round(result.labourCost * 0.30))
   })
 
   it('totalCost = labourCost + overheadCost', () => {

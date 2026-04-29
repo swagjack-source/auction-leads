@@ -180,6 +180,15 @@ body {
 ::-webkit-scrollbar-thumb  { background: var(--scrollbar); border-radius: 8px; border: 2px solid var(--bg); }
 ::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); }
 
+/* ── Kanban stage columns — hide per-column scrollbar ───── */
+.stage-cards::-webkit-scrollbar { display: none; }
+
+/* ── Pipeline board — fat horizontal scrollbar ─────────── */
+.pipeline-board::-webkit-scrollbar        { height: 16px; }
+.pipeline-board::-webkit-scrollbar-track  { background: var(--bg-2); border-radius: 8px; }
+.pipeline-board::-webkit-scrollbar-thumb  { background: var(--scrollbar); border-radius: 8px; border: 3px solid var(--bg-2); }
+.pipeline-board::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); }
+
 /* ── Animations ───────────────────────────────────────────── */
 @keyframes fadein {
   from { opacity: 0 }
@@ -193,6 +202,11 @@ body {
   from { transform: translateX(24px); opacity: 0 }
   to   { transform: translateX(0);    opacity: 1 }
 }
+@keyframes spin {
+  from { transform: rotate(0deg) }
+  to   { transform: rotate(360deg) }
+}
+.spin { animation: spin 0.9s linear infinite; }
 
 /* ── Button system ────────────────────────────────────────── */
 button { font-family: inherit; }

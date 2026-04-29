@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Plus, Search, Pencil, X, Check, Phone, Mail, DollarSign } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { ROLE_OPTIONS } from '../lib/constants'
 import { useAuth } from '../lib/AuthContext'
+import { useSupabaseQuery } from '../lib/useSupabaseQuery'
 
 const ROLE_COLORS = {
   'Owner':       '#A50050',
@@ -224,33 +225,29 @@ function EmployeeCard({ emp, types, onEdit, onToggle }) {
 
 export default function Employees() {
   const { organizationId } = useAuth()
-  const [employees, setEmployees]     = useState([])
-  const [projectTypes, setProjectTypes] = useState([])
-  const [employeeTypes, setEmployeeTypes] = useState({})
-  const [loading, setLoading]         = useState(true)
   const [search, setSearch]           = useState('')
   const [filterActive, setFilterActive] = useState('active')
   const [modalEmployee, setModalEmployee] = useState(null)
 
-  useEffect(() => { fetchAll() }, [])
-
-  async function fetchAll() {
-    setLoading(true)
+  const { data, loading, error, refetch: refetchEmployees, mutate } = useSupabaseQuery(async () => {
     const [empRes, ptRes, tmRes] = await Promise.all([
       supabase.from('employees').select('*').order('name'),
       supabase.from('project_types').select('*').order('name'),
       supabase.from('employee_project_types').select('employee_id, project_type_id, project_types(name)'),
     ])
-    setEmployees(empRes.data || [])
-    setProjectTypes(ptRes.data || [])
-    const map = {}
+    if (empRes.error || ptRes.error || tmRes.error)
+      throw empRes.error || ptRes.error || tmRes.error
+    const employeeTypes = {}
     for (const row of (tmRes.data || [])) {
-      if (!map[row.employee_id]) map[row.employee_id] = []
-      map[row.employee_id].push({ id: row.project_type_id, name: row.project_types?.name })
+      if (!employeeTypes[row.employee_id]) employeeTypes[row.employee_id] = []
+      employeeTypes[row.employee_id].push({ id: row.project_type_id, name: row.project_types?.name })
     }
-    setEmployeeTypes(map)
-    setLoading(false)
-  }
+    return { employees: empRes.data || [], projectTypes: ptRes.data || [], employeeTypes }
+  }, [], { errorMessage: 'Failed to load employees. Please try again.' })
+
+  const employees    = data?.employees    ?? []
+  const projectTypes = data?.projectTypes ?? []
+  const employeeTypes = data?.employeeTypes ?? {}
 
   async function handleSave(form, typeIds) {
     const payload = {
@@ -273,12 +270,15 @@ export default function Employees() {
     if (typeIds.length > 0) {
       await supabase.from('employee_project_types').insert(typeIds.map(tid => ({ employee_id: empId, project_type_id: tid, organization_id: organizationId })))
     }
-    await fetchAll()
+    await refetchEmployees()
   }
 
   async function toggleActive(emp) {
     await supabase.from('employees').update({ active: !emp.active }).eq('id', emp.id)
-    setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, active: !emp.active } : e))
+    mutate(prev => prev
+      ? { ...prev, employees: prev.employees.map(e => e.id === emp.id ? { ...e, active: !emp.active } : e) }
+      : prev
+    )
   }
 
   const filtered = employees.filter(e => {
@@ -330,7 +330,9 @@ export default function Employees() {
 
       {/* Grid */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
-        {loading ? (
+        {error ? (
+          <div style={{ textAlign: 'center', color: 'var(--lose)', fontSize: 13, marginTop: 60 }}>{error}</div>
+        ) : loading ? (
           <div style={{ textAlign: 'center', color: 'var(--ink-4)', fontSize: 13, marginTop: 60 }}>Loading…</div>
         ) : filtered.length === 0 ? (
           <div style={{ textAlign: 'center', color: 'var(--ink-4)', fontSize: 13, marginTop: 60 }}>

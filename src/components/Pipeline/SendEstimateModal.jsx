@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { X, Send, FileText } from 'lucide-react'
-import { pdf } from '@react-pdf/renderer'
-import EstimateDoc from './EstimateDoc'
+// @react-pdf/renderer is ~1.3 MB minified — load on-demand the first time the
+// user actually sends an estimate rather than bundling it into Pipeline.
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../lib/AuthContext'
 
@@ -23,7 +23,11 @@ export default function SendEstimateModal({ lead, scoreDetails, onClose, onSent 
     setError(null)
 
     try {
-      // 1. Generate PDF client-side
+      // 1. Generate PDF client-side (lazy-load the PDF renderer on first use)
+      const [{ pdf }, { default: EstimateDoc }] = await Promise.all([
+        import('@react-pdf/renderer'),
+        import('./EstimateDoc'),
+      ])
       const docData = { lead, bid, labourHours, labourCost, overhead, total }
       const blob = await pdf(<EstimateDoc {...docData} />).toBlob()
       const base64 = await blobToBase64(blob)

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { X, BookUser } from 'lucide-react'
+import { validateRequired, validateEmail, validatePhone, firstError } from '../../lib/validate'
 
 const fieldBase = {
   width: '100%', boxSizing: 'border-box',
@@ -53,6 +54,7 @@ export default function NewContactModal({ onClose, onSave }) {
     name: '', cat: 'Partner', role: '', org: '', phone: '', email: '',
     city: '', fav: false, note: '',
   })
+  const [error, setError] = useState(null)
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
   const valid = form.name && form.cat
 
@@ -66,7 +68,12 @@ export default function NewContactModal({ onClose, onSave }) {
   }, [onClose])
 
   const handleSave = () => {
-    if (!valid) return
+    const err = firstError(
+      validateRequired(form.name, 'Name'),
+      validateEmail(form.email),
+      validatePhone(form.phone),
+    )
+    if (err) { setError(err); return }
     onSave && onSave(form)
     onClose()
   }
@@ -159,13 +166,26 @@ export default function NewContactModal({ onClose, onSave }) {
         </div>
 
         {/* Footer */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 20px', borderTop: '1px solid var(--line)', background: 'var(--bg-2)' }}>
-          <button style={btnGhost} onClick={onClose}>Cancel</button>
-          <div style={{ flex: 1 }} />
-          <button style={btnGhost} onClick={() => { onSave && onSave(form); setForm({ name: '', cat: 'Partner', role: '', org: '', phone: '', email: '', city: '', fav: false, note: '' }) }}>
-            Save &amp; add another
-          </button>
-          <button style={btnPrimary} onClick={handleSave}>Save Contact</button>
+        <div style={{ borderTop: '1px solid var(--line)', background: 'var(--bg-2)' }}>
+          {error && (
+            <div style={{ padding: '6px 20px', fontSize: 12, color: 'var(--lose, #C84A4A)', background: 'rgba(200,74,74,0.06)' }}>
+              {error}
+            </div>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 20px' }}>
+            <button style={btnGhost} onClick={onClose}>Cancel</button>
+            <div style={{ flex: 1 }} />
+            <button style={btnGhost} onClick={() => {
+              const err = firstError(validateRequired(form.name, 'Name'), validateEmail(form.email), validatePhone(form.phone))
+              if (err) { setError(err); return }
+              onSave && onSave(form)
+              setForm({ name: '', cat: 'Partner', role: '', org: '', phone: '', email: '', city: '', fav: false, note: '' })
+              setError(null)
+            }}>
+              Save &amp; add another
+            </button>
+            <button style={btnPrimary} onClick={handleSave}>Save Contact</button>
+          </div>
         </div>
       </div>
     </>

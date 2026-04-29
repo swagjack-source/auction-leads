@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Menu, Bell, Moon, Sun, HelpCircle } from 'lucide-react'
 import Tour from './components/Tour'
@@ -6,25 +6,26 @@ import { useTheme } from './lib/ThemeContext'
 import ErrorBoundary from './components/ErrorBoundary'
 import PrivateRoute from './components/PrivateRoute'
 import Sidebar from './components/Layout/Sidebar'
-import Home from './pages/Home'
-import Pipeline from './pages/Pipeline'
-import DealScorer from './pages/DealScorer'
-import CalendarPage from './pages/CalendarPage'
-import Contacts from './pages/Contacts'
-import Projects from './pages/Projects'
-import BDR from './pages/BDR'
-import Employees from './pages/Employees'
-import Training from './pages/Training'
-import Library from './pages/Library'
-import Activity from './pages/Activity'
-import Templates from './pages/Templates'
-import Expenses from './pages/Expenses'
-import Inventory from './pages/Inventory'
-import CTBids from './pages/CTBids'
-import SavedViews from './pages/SavedViews'
-import CrewSchedule from './pages/CrewSchedule'
-import TeamSettings from './pages/TeamSettings'
-import Login from './pages/Login'
+
+// Route-based code splitting — each page loads only when first visited.
+const Home         = lazy(() => import('./pages/Home'))
+const Pipeline     = lazy(() => import('./pages/Pipeline'))
+const DealScorer   = lazy(() => import('./pages/DealScorer'))
+const CalendarPage = lazy(() => import('./pages/CalendarPage'))
+const Contacts     = lazy(() => import('./pages/Contacts'))
+const Projects     = lazy(() => import('./pages/Projects'))
+const BDR          = lazy(() => import('./pages/BDR'))
+const Training     = lazy(() => import('./pages/Training'))
+const Library      = lazy(() => import('./pages/Library'))
+const Activity     = lazy(() => import('./pages/Activity'))
+const Templates    = lazy(() => import('./pages/Templates'))
+const Expenses     = lazy(() => import('./pages/Expenses'))
+const Inventory    = lazy(() => import('./pages/Inventory'))
+const CTBids       = lazy(() => import('./pages/CTBids'))
+const SavedViews   = lazy(() => import('./pages/SavedViews'))
+const CrewSchedule = lazy(() => import('./pages/CrewSchedule'))
+const TeamSettings = lazy(() => import('./pages/TeamSettings'))
+const Login        = lazy(() => import('./pages/Login'))
 import { TeamProvider } from './lib/TeamContext'
 import { ThemeProvider } from './lib/ThemeContext'
 import { AuthProvider } from './lib/AuthContext'
@@ -32,14 +33,13 @@ import { useIsMobile } from './hooks/useIsMobile'
 import './index.css'
 
 const PAGE_TITLES = {
-  '/home':       'Home',
-  '/':           'Pipeline',
+  '/':           'Home',
+  '/pipeline':   'Pipeline',
   '/projects':   'Projects',
   '/scorer':     'Deal Scorer',
   '/calendar':   'Calendar',
   '/bdr':        'BDR',
   '/contacts':   'Contacts',
-  '/employees':  'Employees',
   '/training':   'Training',
   '/library':    'Library',
   '/activity':   'Activity',
@@ -57,7 +57,7 @@ function Topbar({ onMenuClick, isMobile, onStartTour }) {
   const navigate = useNavigate()
   const { theme, toggle } = useTheme()
   const title = PAGE_TITLES[location.pathname] || 'Workspace'
-  const isPipeline = location.pathname === '/'
+  const isPipeline = location.pathname === '/pipeline'
   const isProjects = location.pathname.startsWith('/projects')
 
   return (
@@ -177,7 +177,11 @@ function AppLayout() {
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: 'var(--bg)' }}>
-      {!isMobile && <Sidebar />}
+      {!isMobile && (
+        <ErrorBoundary inline>
+          <Sidebar />
+        </ErrorBoundary>
+      )}
 
       {isMobile && sidebarOpen && (
         <>
@@ -185,14 +189,22 @@ function AppLayout() {
             style={{ position: 'fixed', inset: 0, background: 'var(--overlay-heavy)', zIndex: 199 }}
             onClick={() => setSidebarOpen(false)}
           />
-          <Sidebar mobile onClose={() => setSidebarOpen(false)} />
+          <ErrorBoundary inline>
+            <Sidebar mobile onClose={() => setSidebarOpen(false)} />
+          </ErrorBoundary>
         </>
       )}
 
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <Topbar onMenuClick={() => setSidebarOpen(true)} isMobile={isMobile} onStartTour={() => setTourActive(true)} />
         <main style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-          <Outlet />
+          <Suspense fallback={
+            <div style={{ flex: 1, display: 'grid', placeItems: 'center', color: 'var(--ink-3)', fontSize: 13 }}>
+              Loading…
+            </div>
+          }>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
       {tourActive && <Tour onClose={() => setTourActive(false)} />}
@@ -209,16 +221,15 @@ export default function App() {
             <BrowserRouter>
               <ErrorBoundary>
                 <Routes>
-                  <Route path="/login" element={<Login />} />
+                  <Route path="/login" element={<Suspense fallback={null}><Login /></Suspense>} />
                   <Route element={<AppLayout />}>
-                    <Route path="/home"      element={<PrivateRoute><Home /></PrivateRoute>} />
-                    <Route path="/"          element={<PrivateRoute><Pipeline /></PrivateRoute>} />
+                    <Route path="/"          element={<PrivateRoute><Home /></PrivateRoute>} />
+                    <Route path="/pipeline"  element={<PrivateRoute><Pipeline /></PrivateRoute>} />
                     <Route path="/scorer"    element={<PrivateRoute><DealScorer /></PrivateRoute>} />
                     <Route path="/calendar"  element={<PrivateRoute><CalendarPage /></PrivateRoute>} />
                     <Route path="/bdr"       element={<PrivateRoute><BDR /></PrivateRoute>} />
                     <Route path="/contacts"  element={<PrivateRoute><Contacts /></PrivateRoute>} />
                     <Route path="/projects"  element={<PrivateRoute><Projects /></PrivateRoute>} />
-                    <Route path="/employees" element={<PrivateRoute><Employees /></PrivateRoute>} />
                     <Route path="/training"  element={<PrivateRoute><Training /></PrivateRoute>} />
                     <Route path="/library"   element={<PrivateRoute><Library /></PrivateRoute>} />
                     <Route path="/activity"  element={<PrivateRoute><Activity /></PrivateRoute>} />

@@ -1,8 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Plus, Search, Trash2, X, Phone, Mail, MapPin, Building2, Pencil, Star, Upload, Download, ChevronRight, ExternalLink } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { CONTACT_TYPES } from '../lib/constants'
 import { useAuth } from '../lib/AuthContext'
+import { validateRequired, validateEmail, validatePhone, firstError } from '../lib/validate'
+import { useSupabaseQuery } from '../lib/useSupabaseQuery'
 
 const TYPE_META = {
   'Partner':       { color: '#3b82f6', dot: '#3b82f6' },
@@ -39,7 +41,12 @@ function ContactModal({ contact, onClose, onSave, onSaveAnother }) {
   function set(k, v) { setForm(f => ({ ...f, [k]: v })) }
 
   async function doSave() {
-    if (!form.name.trim()) { setError('Name is required'); return null }
+    const err = firstError(
+      validateRequired(form.name, 'Name'),
+      validateEmail(form.email),
+      validatePhone(form.phone),
+    )
+    if (err) { setError(err); return null }
     setSaving(true); setError(null)
     try { await onSave(form); return true }
     catch (e) { setError(e.message); return false }
@@ -168,22 +175,17 @@ function timeAgo(dateStr) {
 
 export default function Contacts() {
   const { organizationId } = useAuth()
-  const [contacts, setContacts]         = useState([])
-  const [loading, setLoading]           = useState(true)
   const [search, setSearch]             = useState('')
   const [activeType, setActiveType]     = useState('All')
   const [selected, setSelected]         = useState(null)
   const [modalContact, setModalContact] = useState(null)
   const [showStarred, setShowStarred]   = useState(false)
 
-  useEffect(() => { fetchContacts() }, [])
-
-  async function fetchContacts() {
-    setLoading(true)
-    const { data } = await supabase.from('contacts').select('*').order('name')
-    setContacts((data || []).map(c => ({ ...c, type: c.category })))
-    setLoading(false)
-  }
+  const { data: contacts = [], loading, error, refetch: refetchContacts } = useSupabaseQuery(async () => {
+    const { data, error } = await supabase.from('contacts').select('*').order('name')
+    if (error) throw error
+    return (data || []).map(c => ({ ...c, type: c.category }))
+  }, [], { errorMessage: 'Failed to load contacts. Please try again.' })
 
   async function handleSave(form) {
     const payload = {
@@ -200,14 +202,14 @@ export default function Contacts() {
       const { error } = await supabase.from('contacts').update(payload).eq('id', form.id)
       if (error) throw new Error(error.message)
     }
-    await fetchContacts()
+    await refetchContacts()
   }
 
   async function handleDelete(id) {
     if (!confirm('Delete this contact?')) return
     await supabase.from('contacts').delete().eq('id', id)
-    setContacts(cs => cs.filter(c => c.id !== id))
     if (selected?.id === id) setSelected(null)
+    await refetchContacts()
   }
 
   const typeCounts = CONTACT_TYPES.reduce((acc, t) => {
@@ -349,7 +351,9 @@ export default function Contacts() {
 
           {/* List */}
           <div style={{ flex: 1, overflowY: 'auto' }}>
-            {loading ? (
+            {error ? (
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--lose)', fontSize: 12 }}>{error}</div>
+            ) : loading ? (
               <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-4)', fontSize: 12 }}>Loading…</div>
             ) : showStarred ? (
               <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-4)', fontSize: 12 }}>No starred contacts yet</div>
@@ -539,7 +543,7 @@ export default function Contacts() {
             setModalContact(null)
             if (form.id) setSelected({ ...selected, ...form })
           }}
-          onSaveAnother={() => fetchContacts()}
+          onSaveAnother={() => refetchContacts()}
         />
       )}
     </div>

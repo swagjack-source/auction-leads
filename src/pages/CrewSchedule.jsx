@@ -1,33 +1,157 @@
-import { useState, useEffect, useMemo } from 'react'
-import { Download, Plus, X, ChevronLeft, ChevronRight, Users, Calendar, Clock, MapPin } from 'lucide-react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
+import {
+  Users, MapPin, ChevronLeft, ChevronRight, Download, X,
+  Calendar, Clock, LayoutGrid, List, CheckSquare, Square,
+} from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
+import { useSupabaseQuery } from '../lib/useSupabaseQuery'
 import { estimateLabourHours, estimateProjectDays, estimateCrew } from '../lib/scoring'
+import logger from '../lib/logger'
 
-// ── Date helpers ──────────────────────────────────────────────
+// ─── Date helpers ───────────────────────────────────────────────────────────
 
 function toDateStr(d) {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
 }
 function addDays(d, n) { const r = new Date(d); r.setDate(r.getDate()+n); return r }
-function fmtShort(d) { return new Date(d+'T00:00:00').toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'}) }
-function fmtFull(d) { return new Date(d+'T00:00:00').toLocaleDateString([],{weekday:'long',month:'long',day:'numeric'}) }
-
 function getWeekDates(anchor) {
   const d = new Date(anchor)
-  d.setDate(d.getDate() - d.getDay()) // Sunday
+  d.setDate(d.getDate() - d.getDay())
   return Array.from({length:7},(_,i)=>toDateStr(addDays(d,i)))
 }
+function addWorkdays(startStr, n) {
+  let d = new Date(startStr+'T00:00:00'), count = 0
+  while (count < n) {
+    d = addDays(d, 1)
+    if (d.getDay() !== 0 && d.getDay() !== 6) count++
+  }
+  return toDateStr(d)
+}
+function fmtShort(dateStr) {
+  return new Date(dateStr+'T00:00:00').toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'})
+}
+function daysBetween(a, b) {
+  return Math.max(0, Math.round((new Date(b+'T00:00:00') - new Date(a+'T00:00:00')) / 86400000))
+}
+function getWeekLabel(anchor) {
+  const dates = getWeekDates(anchor)
+  const s = new Date(dates[0]+'T00:00:00')
+  const e = new Date(dates[6]+'T00:00:00')
+  const so = s.toLocaleDateString([],{month:'short',day:'numeric'})
+  const eo = e.toLocaleDateString([],{month:'short',day:'numeric'})
+  return `${so} – ${eo}`
+}
+function getSundayOfWeek(dateStr) {
+  const d = new Date(dateStr+'T00:00:00')
+  d.setDate(d.getDate() - d.getDay())
+  return toDateStr(d)
+}
 
-// ── ConnectTeam CSV export ────────────────────────────────────
+// ─── Constants ──────────────────────────────────────────────────────────────
+
+const JOB_COLORS = {
+  'Clean Out': '#3B82F6',
+  'Auction': '#7F77DD',
+  'Both': '#6366F1',
+  'Move': '#1D9E75',
+  'Sorting/Organizing': '#D97706',
+  'In-Person Sale': '#C2410C',
+}
+
+const AVATAR_COLORS = ['#3B82F6','#7F77DD','#1D9E75','#D97706','#C2410C','#6366F1','#0891B2','#DB2777']
+function avatarColor(idx) { return AVATAR_COLORS[idx % AVATAR_COLORS.length] }
+
+const DAY_LABELS = ['S','M','T','W','T','F','S']
+
+// ─── Availability computation ───────────────────────────────────────────────
+
+function computeAvailability(employees, projects, assignments, assignmentHours, weekDates, unavailability) {
+  return employees.map(emp => {
+    const capacity = emp.max_weekly_hours ?? 40
+    const workDays = emp.work_days ?? ['Mon','Tue','Wed','Thu','Fri']
+    const DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+
+    const dailyHours = {}
+
+    // Mark unavailable days as fully booked
+    for (const block of (unavailability || [])) {
+      if (block.employee_id !== emp.id) continue
+      let d = new Date(block.start_date + 'T00:00:00')
+      const end = new Date(block.end_date + 'T00:00:00')
+      while (d <= end) {
+        const ds = toDateStr(d)
+        if (weekDates.includes(ds)) {
+          dailyHours[ds] = (capacity / 5) // mark as fully used for that day
+        }
+        d = addDays(d, 1)
+      }
+    }
+
+    // Add project assignment hours
+    for (const p of projects) {
+      const pIds = assignments[p.id] || []
+      if (!pIds.includes(emp.id)) continue
+      if (!p.project_start) continue
+      const pEnd = p.project_end || p.project_start
+      const hrs = (assignmentHours[p.id]?.[emp.id]) || 0
+      const workdays = []
+      let d = new Date(p.project_start + 'T00:00:00')
+      const end = new Date(pEnd + 'T00:00:00')
+      while (d <= end) {
+        const dayName = DAY_NAMES[d.getDay()]
+        if (workDays.includes(dayName)) workdays.push(toDateStr(d))
+        d = addDays(d, 1)
+      }
+      if (workdays.length === 0) continue
+      const hrsPerDay = hrs / workdays.length
+      for (const wd of workdays) {
+        if (!dailyHours[wd]) dailyHours[wd] = 0
+        dailyHours[wd] += hrsPerDay
+      }
+    }
+
+    let totalHours = 0
+    for (const d of weekDates) {
+      totalHours += dailyHours[d] || 0
+    }
+
+    // Mark non-work days
+    const nonWorkDays = weekDates.filter(d => {
+      const dayName = DAY_NAMES[new Date(d + 'T00:00:00').getDay()]
+      return !workDays.includes(dayName)
+    })
+
+    return { ...emp, dailyHours, totalHours: Math.round(totalHours * 10) / 10, capacity, nonWorkDays }
+  })
+}
+
+// Compute overlap hours for an employee against projects they're on that overlap a date range
+function overlapHours(empId, targetStart, targetEnd, projects, assignments, assignmentHours) {
+  if (!targetStart) return 0
+  const te = targetEnd || targetStart
+  let total = 0
+  for (const p of projects) {
+    if (p.project_start === targetStart && (p.project_end || p.project_start) === te) continue // same project
+    const pIds = assignments[p.id] || []
+    if (!pIds.includes(empId)) continue
+    if (!p.project_start) continue
+    const pEnd = p.project_end || p.project_start
+    // Check overlap
+    if (p.project_start > te || pEnd < targetStart) continue
+    total += (assignmentHours[p.id]?.[empId]) || 0
+  }
+  return Math.round(total)
+}
+
+// ─── ConnectTeam CSV export ──────────────────────────────────────────────────
 
 function exportConnectTeam(projects, assignments, employees) {
   const rows = [['Employee','Job Title','Location','Date','Start Time','End Time','Hours','Notes']]
   for (const p of projects) {
     const crew = assignments[p.id] || []
     const hrs = estimateLabourHours(p.square_footage||1200, p.density||'Medium')
-    const days = estimateProjectDays(p.square_footage||1200, p.density||'Medium', p.job_type||'Clean Out', crew.length||2)
-    const start = p.start_date || ''
     const empNames = crew.length
       ? crew.map(eid => employees.find(e=>e.id===eid)?.name||'').filter(Boolean)
       : ['Unassigned']
@@ -36,7 +160,7 @@ function exportConnectTeam(projects, assignments, employees) {
         name,
         p.name || 'Project',
         p.address || '',
-        start,
+        p.project_start || '',
         '08:00',
         `${8 + Math.round(hrs/Math.max(crew.length,1))}:00`,
         Math.round(hrs/Math.max(crew.length,1)),
@@ -51,344 +175,1376 @@ function exportConnectTeam(projects, assignments, employees) {
   URL.revokeObjectURL(url)
 }
 
-// ── Assign crew modal ─────────────────────────────────────────
+// ─── Small reusable bits ─────────────────────────────────────────────────────
 
-function AssignCrewModal({ project, employees, employeeTypes, currentAssignment, onClose, onSave }) {
-  const [selected, setSelected] = useState(currentAssignment || [])
-  const toggle = id => setSelected(p => p.includes(id) ? p.filter(x=>x!==id) : [...p, id])
-
-  // Auto-suggest based on project job_type matching employee teams
-  const suggested = useMemo(() => {
-    return employees.filter(e => {
-      const types = employeeTypes[e.id] || []
-      const jt = (project.job_type||'').toLowerCase()
-      return types.some(t => t.name?.toLowerCase().includes(jt.split(' ')[0]))
-    })
-  }, [employees, project, employeeTypes])
-
-  const estSize = estimateCrew(project.square_footage||1200, project.density||'Medium', project.job_type||'Clean Out')
-
+function Avatar({ name, idx, size = 28 }) {
+  const bg = avatarColor(idx)
+  const initials = (name||'?').split(' ').map(p=>p[0]).slice(0,2).join('').toUpperCase()
   return (
-    <div style={{position:'fixed',inset:0,zIndex:200,background:'rgba(0,0,0,0.7)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}}
-      onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
-      <div style={{background:'var(--panel)',border:'1px solid var(--line)',borderRadius:14,width:'100%',maxWidth:480,maxHeight:'85vh',overflow:'hidden',display:'flex',flexDirection:'column'}}>
-        <div style={{padding:'14px 18px',borderBottom:'1px solid var(--line)',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
-          <div>
-            <div style={{fontSize:14,fontWeight:700,color:'var(--ink-1)'}}>Assign Crew</div>
-            <div style={{fontSize:12,color:'var(--ink-3)',marginTop:2}}>{project.name} · Recommended: {estSize} people</div>
-          </div>
-          <button onClick={onClose} style={{background:'none',border:'none',cursor:'pointer',color:'var(--ink-3)'}}><X size={16}/></button>
-        </div>
-
-        {suggested.length > 0 && (
-          <div style={{padding:'10px 18px 4px',borderBottom:'1px solid var(--line-2)',flexShrink:0}}>
-            <div style={{fontSize:10.5,fontWeight:700,color:'var(--accent)',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:6}}>Suggested by team</div>
-            <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
-              {suggested.map(e=>(
-                <button key={e.id} onClick={()=>toggle(e.id)} style={{padding:'4px 10px',borderRadius:999,fontSize:12,fontWeight:600,cursor:'pointer',border:`1px solid ${selected.includes(e.id)?'var(--accent)':'var(--line)'}`,background:selected.includes(e.id)?'var(--accent-soft)':'var(--bg)',color:selected.includes(e.id)?'var(--accent-ink)':'var(--ink-2)',transition:'all 0.12s'}}>
-                  {e.name}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div style={{flex:1,overflowY:'auto',padding:'10px 18px'}}>
-          <div style={{fontSize:10.5,fontWeight:700,color:'var(--ink-4)',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:8}}>All Active Employees</div>
-          {employees.filter(e=>e.active).map(e=>{
-            const on = selected.includes(e.id)
-            const types = employeeTypes[e.id]||[]
-            return (
-              <button key={e.id} onClick={()=>toggle(e.id)} style={{width:'100%',textAlign:'left',padding:'8px 10px',borderRadius:9,border:`1px solid ${on?'var(--accent)':'var(--line)'}`,background:on?'var(--accent-soft)':'transparent',marginBottom:5,cursor:'pointer',display:'flex',alignItems:'center',gap:10,fontFamily:'inherit',transition:'all 0.1s'}}>
-                <div style={{width:30,height:30,borderRadius:'50%',background:on?'var(--accent)':'var(--line-2)',color:on?'white':'var(--ink-3)',display:'grid',placeItems:'center',fontSize:11,fontWeight:700,flexShrink:0}}>
-                  {e.name.split(' ').map(w=>w[0]).slice(0,2).join('')}
-                </div>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:13,fontWeight:600,color:on?'var(--accent-ink)':'var(--ink-1)'}}>{e.name}</div>
-                  {types.length>0 && <div style={{fontSize:11,color:'var(--ink-4)'}}>{types.map(t=>t.name).join(', ')}</div>}
-                </div>
-                {on && <div style={{width:16,height:16,borderRadius:'50%',background:'var(--accent)',display:'grid',placeItems:'center',flexShrink:0}}>
-                  <X size={9} color="white"/>
-                </div>}
-              </button>
-            )
-          })}
-        </div>
-
-        <div style={{padding:'12px 18px',borderTop:'1px solid var(--line)',display:'flex',justifyContent:'space-between',alignItems:'center',flexShrink:0}}>
-          <span style={{fontSize:12.5,color:'var(--ink-3)'}}>{selected.length} selected</span>
-          <div style={{display:'flex',gap:8}}>
-            <button onClick={onClose} style={{padding:'7px 14px',borderRadius:8,border:'1px solid var(--line)',background:'none',color:'var(--ink-2)',fontSize:13,cursor:'pointer'}}>Cancel</button>
-            <button onClick={()=>onSave(selected)} style={{padding:'7px 16px',borderRadius:8,border:'none',background:'var(--accent)',color:'white',fontSize:13,fontWeight:600,cursor:'pointer'}}>Save Crew</button>
-          </div>
-        </div>
-      </div>
+    <div style={{
+      width:size, height:size, borderRadius:'50%', background:bg,
+      color:'#fff', display:'flex', alignItems:'center', justifyContent:'center',
+      fontSize: size <= 28 ? 10 : 12, fontWeight:700, flexShrink:0,
+    }}>
+      {initials}
     </div>
   )
 }
 
-// ── Project row ───────────────────────────────────────────────
+function StatusDot({ color }) {
+  return <span style={{
+    display:'inline-block', width:8, height:8, borderRadius:'50%',
+    background:color, marginRight:5, flexShrink:0,
+  }} />
+}
 
-function ProjectRow({ project, employees, employeeTypes, assignment, onAssign, weekDates }) {
-  const crew = assignment || []
-  const hrs = project.square_footage ? estimateLabourHours(project.square_footage, project.density||'Medium') : null
-  const days = hrs ? estimateProjectDays(project.square_footage, project.density||'Medium', project.job_type||'Clean Out', crew.length||2) : null
-  const estSize = estimateCrew(project.square_footage||1200, project.density||'Medium', project.job_type||'Clean Out')
+function Toast({ message, type }) {
+  if (!message) return null
+  const bg = type === 'success' ? '#22C55E' : '#EF4444'
+  return (
+    <div style={{
+      position:'fixed', bottom:24, right:24, zIndex:9999,
+      background:bg, color:'#fff', borderRadius:10,
+      padding:'10px 18px', fontWeight:600, fontSize:14,
+      boxShadow:'0 4px 16px rgba(0,0,0,0.18)',
+      pointerEvents:'none',
+    }}>
+      {message}
+    </div>
+  )
+}
 
-  const startDate = project.start_date
-  const endDate   = project.end_date || (startDate && days ? toDateStr(addDays(new Date(startDate+'T00:00:00'), days-1)) : null)
+function SkeletonBox({ height = 120 }) {
+  return (
+    <div style={{
+      background:'var(--line)', borderRadius:12, height,
+      marginBottom:10, animation:'pulse 1.5s ease-in-out infinite',
+      opacity:0.5,
+    }} />
+  )
+}
 
-  const JOB_COLORS = {
-    'Clean Out': '#3E5C86', Auction: '#A50050', Both: '#2F7A55',
-    Move: '#C28A2A', 'In-person Estate Sale': '#7c3aed',
+function SectionHeader({ label, count, onToggle, expanded }) {
+  return (
+    <div
+      onClick={onToggle}
+      style={{
+        display:'flex', alignItems:'center', gap:8, marginBottom:8, marginTop:16,
+        cursor: onToggle ? 'pointer' : 'default',
+      }}
+    >
+      <span style={{
+        fontSize:11, fontWeight:700, textTransform:'uppercase',
+        letterSpacing:'0.08em', color:'var(--ink-3)',
+      }}>
+        {label}
+      </span>
+      {count != null && (
+        <span style={{
+          background:'var(--accent)', color:'#fff', borderRadius:999,
+          fontSize:10, fontWeight:700, padding:'1px 7px',
+        }}>
+          {count}
+        </span>
+      )}
+      {onToggle && (
+        <span style={{color:'var(--ink-3)', fontSize:12, marginLeft:'auto'}}>
+          {expanded ? '▲' : '▼'}
+        </span>
+      )}
+    </div>
+  )
+}
+
+// ─── Inline Set-Dates expansion ──────────────────────────────────────────────
+
+function SetDatesExpansion({ project, onSave, onCancel }) {
+  const hrs = estimateLabourHours(project.square_footage||1200, project.density||'Medium')
+  const today = toDateStr(new Date())
+  const [startDate, setStartDate] = useState(today)
+  const [endDate, setEndDate] = useState(() => addWorkdays(today, Math.ceil(hrs/8)))
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (startDate) {
+      setEndDate(addWorkdays(startDate, Math.max(1, Math.ceil(hrs/8))))
+    }
+  }, [startDate, hrs])
+
+  async function handleSave() {
+    if (!startDate) return
+    setSaving(true)
+    try {
+      const { error } = await supabase.from('leads')
+        .update({ project_start: startDate, project_end: endDate || startDate })
+        .eq('id', project.id)
+      if (error) throw error
+      onSave(project.id, startDate, endDate || startDate)
+    } catch(e) {
+      logger.error('SetDates save error', e)
+    } finally {
+      setSaving(false)
+    }
   }
-  const jobColor = JOB_COLORS[project.job_type] || 'var(--ink-3)'
 
   return (
-    <div style={{background:'var(--panel)',border:'1px solid var(--line)',borderRadius:12,padding:'14px 16px',display:'flex',flexDirection:'column',gap:10}}>
-      {/* Top row */}
-      <div style={{display:'flex',alignItems:'flex-start',gap:12}}>
-        <div style={{flex:1,minWidth:0}}>
-          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
-            <span style={{fontSize:13,fontWeight:700,color:'var(--ink-1)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{project.name||'Unnamed Project'}</span>
-            {project.job_type && <span style={{fontSize:10,fontWeight:700,color:jobColor,background:`${jobColor}14`,border:`1px solid ${jobColor}30`,borderRadius:999,padding:'2px 7px',flexShrink:0}}>{project.job_type}</span>}
-          </div>
-          <div style={{display:'flex',flexWrap:'wrap',gap:'4px 12px'}}>
-            {project.address && <span style={{display:'flex',alignItems:'center',gap:4,fontSize:11.5,color:'var(--ink-3)'}}><MapPin size={10}/>{project.address}</span>}
-            {hrs && <span style={{display:'flex',alignItems:'center',gap:4,fontSize:11.5,color:'var(--ink-3)'}}><Clock size={10}/>{hrs} hrs est.</span>}
-            {project.square_footage && <span style={{fontSize:11.5,color:'var(--ink-3)'}}>{project.square_footage.toLocaleString()} sq ft · {project.density}</span>}
-          </div>
-          {project.notes && <div style={{fontSize:11.5,color:'var(--ink-4)',marginTop:4,fontStyle:'italic'}}>{project.notes}</div>}
-        </div>
-
-        {/* Timeline */}
-        <div style={{textAlign:'right',flexShrink:0}}>
-          {startDate ? (
-            <>
-              <div style={{fontSize:11,color:'var(--ink-4)'}}>Start</div>
-              <div style={{fontSize:12,fontWeight:600,color:'var(--ink-1)'}}>{fmtShort(startDate)}</div>
-              {endDate && endDate !== startDate && <>
-                <div style={{fontSize:11,color:'var(--ink-4)',marginTop:4}}>End</div>
-                <div style={{fontSize:12,fontWeight:600,color:'var(--ink-1)'}}>{fmtShort(endDate)}</div>
-              </>}
-              {days && <div style={{fontSize:11,color:'var(--ink-4)',marginTop:2}}>{days} day{days!==1?'s':''}</div>}
-            </>
-          ) : (
-            <div style={{fontSize:11.5,color:'var(--ink-4)',fontStyle:'italic'}}>No date set</div>
-          )}
-        </div>
+    <div style={{
+      borderTop:'1px solid var(--line)', background:'var(--bg)',
+      padding:'14px 16px',
+    }}>
+      <div style={{fontSize:13,fontWeight:600,color:'var(--ink-1)',marginBottom:10}}>
+        Set project dates for {project.name}
       </div>
-
-      {/* Week bar — show which days project spans */}
-      {startDate && weekDates && (
-        <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:3}}>
-          {weekDates.map(d=>{
-            const inRange = d >= (startDate) && d <= (endDate||startDate)
-            return (
-              <div key={d} style={{height:4,borderRadius:999,background:inRange?jobColor:'var(--line-2)',opacity:inRange?0.8:0.4,transition:'background 0.15s'}}/>
-            )
-          })}
-        </div>
-      )}
-
-      {/* Crew row */}
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',paddingTop:6,borderTop:'1px solid var(--line-2)'}}>
-        <div style={{display:'flex',alignItems:'center',gap:6}}>
-          <Users size={12} color="var(--ink-4)" strokeWidth={1.8}/>
-          {crew.length === 0 ? (
-            <span style={{fontSize:11.5,color:'var(--ink-4)',fontStyle:'italic'}}>No crew assigned · needs {estSize}</span>
-          ) : (
-            <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
-              {crew.map(eid=>{
-                const emp = employees.find(e=>e.id===eid)
-                if(!emp) return null
-                return <span key={eid} style={{fontSize:11.5,fontWeight:600,background:'var(--bg)',border:'1px solid var(--line)',borderRadius:999,padding:'2px 8px',color:'var(--ink-2)'}}>{emp.name}</span>
-              })}
-            </div>
-          )}
-        </div>
-        <button onClick={onAssign} style={{display:'flex',alignItems:'center',gap:5,padding:'5px 10px',borderRadius:8,border:'1px solid var(--line)',background:'var(--bg)',color:'var(--ink-2)',fontSize:12,fontWeight:600,cursor:'pointer'}}>
-          <Plus size={11}/>{crew.length?'Edit Crew':'Assign Crew'}
+      <div style={{display:'flex',gap:12,flexWrap:'wrap',marginBottom:12}}>
+        <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--ink-2)'}}>
+          Start date
+          <input
+            type="date" value={startDate}
+            onChange={e=>setStartDate(e.target.value)}
+            style={{
+              padding:'6px 10px', borderRadius:7, border:'1px solid var(--line)',
+              background:'var(--panel)', color:'var(--ink-1)', fontSize:13,
+            }}
+          />
+        </label>
+        <label style={{display:'flex',flexDirection:'column',gap:4,fontSize:12,color:'var(--ink-2)'}}>
+          End date
+          <input
+            type="date" value={endDate}
+            onChange={e=>setEndDate(e.target.value)}
+            style={{
+              padding:'6px 10px', borderRadius:7, border:'1px solid var(--line)',
+              background:'var(--panel)', color:'var(--ink-1)', fontSize:13,
+            }}
+          />
+        </label>
+      </div>
+      <div style={{fontSize:12,color:'var(--ink-3)',marginBottom:12}}>
+        Auto-calculated from ~{hrs} estimated hrs ({Math.ceil(hrs/8)} workdays)
+      </div>
+      <div style={{display:'flex',gap:8}}>
+        <button
+          onClick={handleSave} disabled={saving}
+          style={{
+            flex:1, padding:'8px 0', borderRadius:8,
+            background:'var(--accent)', color:'#fff', border:'none',
+            fontWeight:600, fontSize:13, cursor:'pointer', opacity:saving?0.7:1,
+          }}
+        >
+          {saving ? 'Saving…' : 'Save Dates'}
+        </button>
+        <button
+          onClick={onCancel}
+          style={{
+            flex:1, padding:'8px 0', borderRadius:8,
+            background:'var(--line)', color:'var(--ink-1)', border:'none',
+            fontWeight:600, fontSize:13, cursor:'pointer',
+          }}
+        >
+          Cancel
         </button>
       </div>
     </div>
   )
 }
 
-// ── Main page ─────────────────────────────────────────────────
+// ─── Inline crew assignment expansion ────────────────────────────────────────
 
-export default function CrewSchedule() {
-  const { organizationId } = useAuth()
-  const [projects, setProjects]     = useState([])
-  const [employees, setEmployees]   = useState([])
-  const [employeeTypes, setEmpTypes]= useState({})
-  const [assignments, setAssignments]= useState({}) // projectId → [empId]
-  const [loading, setLoading]       = useState(true)
-  const [weekAnchor, setWeekAnchor] = useState(toDateStr(new Date()))
-  const [assigningProject, setAssigningProject] = useState(null)
-  const [tab, setTab]               = useState('week') // 'week' | 'all'
+function AssignCrewExpansion({
+  project, employees, employeeTypes,
+  assignments, assignmentHours,
+  projects,
+  onConfirm, onCancel,
+}) {
+  const hrs = estimateLabourHours(project.square_footage||1200, project.density||'Medium')
+  const neededCrew = estimateCrew(project.square_footage||1200, project.density||'Medium', project.job_type||'Clean Out')
 
-  useEffect(()=>{ fetchAll() },[])
+  // Figure out which job type IDs apply to this project
+  const jobTypeName = project.job_type || ''
+  // Find employees pre-qualified for this type
+  const qualifiedEmpIds = useMemo(() => {
+    const s = new Set()
+    for (const [eid, types] of Object.entries(employeeTypes)) {
+      if (types.some(t => t.name === jobTypeName)) s.add(eid)
+    }
+    return s
+  }, [employeeTypes, jobTypeName])
 
-  async function fetchAll() {
-    setLoading(true)
+  const existingAssigned = assignments[project.id] || []
+
+  // Per-employee overlap hours
+  const empOverlap = useMemo(() => {
+    const m = {}
+    for (const emp of employees) {
+      m[emp.id] = overlapHours(
+        emp.id,
+        project.project_start,
+        project.project_end || project.project_start,
+        projects, assignments, assignmentHours
+      )
+    }
+    return m
+  }, [employees, project, projects, assignments, assignmentHours])
+
+  // Pre-select: qualified + not fully booked OR already assigned
+  const initialSelected = useMemo(() => {
+    const s = new Set(existingAssigned)
+    for (const emp of employees) {
+      if (qualifiedEmpIds.has(emp.id) && (empOverlap[emp.id]||0) < 40) {
+        s.add(emp.id)
+      }
+    }
+    return s
+  }, [existingAssigned, employees, qualifiedEmpIds, empOverlap])
+
+  const [selected, setSelected] = useState(initialSelected)
+  const [customHours, setCustomHours] = useState({})
+  const [saving, setSaving] = useState(false)
+
+  const selectedArr = Array.from(selected)
+  const autoHrsPerPerson = selectedArr.length > 0 ? Math.round(hrs / selectedArr.length) : hrs
+
+  function toggleEmp(id) {
+    setSelected(prev => {
+      const n = new Set(prev)
+      n.has(id) ? n.delete(id) : n.add(id)
+      return n
+    })
+  }
+
+  function getHrsForEmp(id) {
+    return customHours[id] != null ? customHours[id] : autoHrsPerPerson
+  }
+
+  async function handleConfirm() {
+    setSaving(true)
     try {
-      const [pRes, eRes, etRes, paRes] = await Promise.all([
-        supabase.from('leads').select('*').in('status',['Project Accepted','Project Scheduled','Won']).order('start_date',{ascending:true,nullsFirst:false}),
-        supabase.from('employees').select('*').eq('active',true).order('name'),
-        supabase.from('employee_project_types').select('employee_id, project_type_id, project_types(name)'),
-        supabase.from('project_assignments').select('lead_id, employee_id'),
-      ])
-      setProjects(pRes.data||[])
-      setEmployees(eRes.data||[])
-      const em = {}
-      for(const r of (etRes.data||[])){
-        if(!em[r.employee_id]) em[r.employee_id]=[]
-        em[r.employee_id].push({id:r.project_type_id,name:r.project_types?.name})
+      // Delete existing
+      const { error: delErr } = await supabase.from('project_assignments')
+        .delete().eq('lead_id', project.id)
+      if (delErr) throw delErr
+
+      // Insert new
+      const rows = selectedArr.map(eid => ({
+        lead_id: project.id,
+        employee_id: eid,
+        estimated_hours: getHrsForEmp(eid),
+      }))
+      if (rows.length > 0) {
+        const { error: insErr } = await supabase.from('project_assignments').insert(rows)
+        if (insErr) throw insErr
       }
-      setEmpTypes(em)
-      const am = {}
-      for(const r of (paRes.data||[])){
-        if(!am[r.lead_id]) am[r.lead_id]=[]
-        am[r.lead_id].push(r.employee_id)
-      }
-      const local = JSON.parse(localStorage.getItem('crew_assignments')||'{}')
-      setAssignments({...local,...am})
+
+      const hoursMap = {}
+      for (const eid of selectedArr) hoursMap[eid] = getHrsForEmp(eid)
+      onConfirm(project.id, selectedArr, hoursMap)
+    } catch(e) {
+      logger.error('AssignCrew save error', e)
+      onConfirm(null, null, null, e.message)
     } finally {
-      setLoading(false)
+      setSaving(false)
     }
   }
 
-  const weekDates = getWeekDates(weekAnchor)
-
-  const projectsInWeek = useMemo(()=>projects.filter(p=>{
-    if(!p.start_date) return false
-    const startOk = p.start_date <= weekDates[6]
-    const endDate  = p.end_date || p.start_date
-    const endOk   = endDate >= weekDates[0]
-    return startOk && endOk
-  }),[projects, weekDates])
-
-  const displayProjects = tab==='week' ? projectsInWeek : projects
-
-  async function handleSaveAssignment(projectId, empIds) {
-    // Save to localStorage (and attempt DB if table exists)
-    const next = {...assignments,[projectId]:empIds}
-    setAssignments(next)
-    localStorage.setItem('crew_assignments', JSON.stringify(next))
-    try {
-      await supabase.from('project_assignments').delete().eq('lead_id',projectId)
-      if(empIds.length){
-        await supabase.from('project_assignments').insert(empIds.map(eid=>({lead_id:projectId,employee_id:eid,organization_id:organizationId})))
-      }
-    } catch {}
-    setAssigningProject(null)
-  }
+  const dateRange = project.project_start
+    ? `${fmtShort(project.project_start)} – ${project.project_end ? fmtShort(project.project_end) : fmtShort(project.project_start)}`
+    : 'No dates set'
 
   return (
-    <div style={{display:'flex',flexDirection:'column',height:'100%',overflow:'hidden'}}>
-      {/* Header */}
-      <div style={{padding:'12px 24px',borderBottom:'1px solid var(--line)',background:'var(--panel)',flexShrink:0}}>
-        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
-          <div>
-            <h1 style={{fontSize:18,fontWeight:700,color:'var(--ink-1)',margin:0,letterSpacing:'-0.02em'}}>Crew Schedule</h1>
-            <p style={{fontSize:12.5,color:'var(--ink-3)',margin:'2px 0 0'}}>{projects.length} active projects · {employees.length} active crew members</p>
+    <div style={{
+      borderTop:'1px solid var(--line)', background:'var(--bg)',
+      padding:'14px 16px', transition:'all 300ms ease-out',
+    }}>
+      <div style={{marginBottom:10}}>
+        <div style={{fontSize:14,fontWeight:700,color:'var(--ink-1)',marginBottom:2}}>
+          Assign crew to {project.name}
+        </div>
+        <div style={{fontSize:12,color:'var(--ink-3)'}}>
+          {project.job_type} · {dateRange} · {hrs} hrs estimated
+        </div>
+      </div>
+
+      <div style={{marginBottom:12}}>
+        {employees.map((emp, idx) => {
+          const overlap = empOverlap[emp.id] || 0
+          const isSelected = selected.has(emp.id)
+          const fullyBooked = overlap >= 40
+          const availColor = overlap < 20 ? '#22C55E' : overlap < 40 ? '#F59E0B' : '#EF4444'
+          const availLabel = overlap < 20 ? 'Available' : overlap < 40 ? `Partially booked (${overlap} hrs)` : 'Fully booked'
+
+          return (
+            <div
+              key={emp.id}
+              onClick={() => toggleEmp(emp.id)}
+              style={{
+                display:'flex', alignItems:'center', gap:10,
+                padding:'8px 0', borderBottom:'1px solid var(--line)',
+                cursor:'pointer', opacity: fullyBooked ? 0.5 : 1,
+              }}
+            >
+              <div style={{flexShrink:0}}>
+                {isSelected
+                  ? <CheckSquare size={16} color="var(--accent)" />
+                  : <Square size={16} color="var(--ink-3)" />
+                }
+              </div>
+              <Avatar name={emp.name} idx={idx} size={28} />
+              <div style={{flex:1, minWidth:0}}>
+                <div style={{fontSize:13,fontWeight:600,color:'var(--ink-1)'}}>
+                  {emp.name}
+                </div>
+                <div style={{fontSize:11,color:'var(--ink-3)'}}>
+                  {emp.role}
+                </div>
+              </div>
+              <div style={{textAlign:'right',flexShrink:0}}>
+                <div style={{fontSize:11,fontWeight:600,color:availColor}}>
+                  {availLabel}
+                </div>
+                <div style={{
+                  fontSize:10, color:'var(--ink-4)',
+                  background:'var(--line)', borderRadius:4, padding:'1px 5px',
+                  marginTop:2,
+                }}>
+                  {overlap} / 40 hrs
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Hours calculator */}
+      <div style={{
+        background:'var(--panel)', borderRadius:9, padding:'10px 12px', marginBottom:12,
+      }}>
+        <div style={{fontSize:12,color:'var(--ink-2)',marginBottom:6}}>
+          Total project hours: <strong>{hrs}</strong> &nbsp;·&nbsp;
+          Selected: <strong>{selectedArr.length} crew</strong> &nbsp;·&nbsp;
+          Hours per person: <strong>~{autoHrsPerPerson} hrs</strong>
+        </div>
+        {selectedArr.map(eid => {
+          const emp = employees.find(e=>e.id===eid)
+          if (!emp) return null
+          return (
+            <div key={eid} style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
+              <span style={{fontSize:12,color:'var(--ink-2)',minWidth:90,flex:1}}>{emp.name}:</span>
+              <input
+                type="number"
+                value={customHours[eid] != null ? customHours[eid] : autoHrsPerPerson}
+                onClick={e => e.stopPropagation()}
+                onChange={e => {
+                  e.stopPropagation()
+                  setCustomHours(prev => ({...prev, [eid]: parseInt(e.target.value)||0}))
+                }}
+                style={{
+                  width:64, padding:'3px 7px', borderRadius:6,
+                  border:'1px solid var(--line)', background:'var(--bg)',
+                  color:'var(--ink-1)', fontSize:12,
+                }}
+              />
+              <span style={{fontSize:12,color:'var(--ink-3)'}}>hrs</span>
+            </div>
+          )
+        })}
+      </div>
+
+      <div style={{display:'flex',gap:8}}>
+        <button
+          onClick={e => { e.stopPropagation(); handleConfirm() }}
+          disabled={saving || selectedArr.length === 0}
+          style={{
+            flex:1, padding:'9px 0', borderRadius:8,
+            background:'var(--accent)', color:'#fff', border:'none',
+            fontWeight:600, fontSize:13, cursor:'pointer',
+            opacity: (saving || selectedArr.length === 0) ? 0.6 : 1,
+          }}
+        >
+          {saving ? 'Saving…' : `Assign ${selectedArr.length} crew member${selectedArr.length!==1?'s':''}`}
+        </button>
+        <button
+          onClick={e => { e.stopPropagation(); onCancel() }}
+          style={{
+            flex:1, padding:'9px 0', borderRadius:8,
+            background:'var(--line)', color:'var(--ink-1)', border:'none',
+            fontWeight:600, fontSize:13, cursor:'pointer',
+          }}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ─── Project Card ─────────────────────────────────────────────────────────────
+
+function ProjectCard({
+  project, idx, employees, employeeTypes,
+  assignments, assignmentHours, projects,
+  expanded, expandingDates,
+  onAssignClick, onAssignConfirm, onAssignCancel,
+  onSetDatesClick, onSetDatesSave, onSetDatesCancel,
+}) {
+  const empIds = assignments[project.id] || []
+  const hrs = estimateLabourHours(project.square_footage||1200, project.density||'Medium')
+  const neededCrew = estimateCrew(project.square_footage||1200, project.density||'Medium', project.job_type||'Clean Out')
+  const assignedCount = empIds.length
+  const staffingColor = assignedCount === 0 ? '#EF4444' : assignedCount < neededCrew ? '#F59E0B' : '#22C55E'
+  const staffingLabel = assignedCount === 0 ? 'Needs crew' : assignedCount < neededCrew ? 'Partially staffed' : 'Fully staffed'
+
+  const hasNoDates = !project.project_start
+
+  const projectDays = project.project_start && project.project_end
+    ? daysBetween(project.project_start, project.project_end) + 1
+    : project.project_start ? 1 : null
+
+  const assignedEmps = empIds.map((eid, i) => ({
+    emp: employees.find(e=>e.id===eid),
+    eid,
+    i,
+  })).filter(x=>x.emp)
+
+  const mapsUrl = project.address
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(project.address)}`
+    : null
+
+  return (
+    <div style={{
+      background:'var(--panel)',
+      border:'1px solid var(--line)',
+      borderRadius:12,
+      borderLeft:`4px solid ${staffingColor}`,
+      marginBottom:10,
+      overflow:'hidden',
+    }}>
+      <div
+        style={{padding:'14px 16px', cursor:'default'}}
+        onClick={() => {}}
+      >
+        {/* Top row */}
+        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8,flexWrap:'wrap'}}>
+          <span style={{fontWeight:700,fontSize:15,color:'var(--ink-1)',flex:1,minWidth:0}}>
+            {project.name}
+          </span>
+          {project.job_type && (
+            <span style={{
+              fontSize:10, fontWeight:700,
+              background: JOB_COLORS[project.job_type] || '#6B7280',
+              color:'#fff', borderRadius:999, padding:'2px 8px',
+              flexShrink:0,
+            }}>
+              {project.job_type}
+            </span>
+          )}
+          <div style={{display:'flex',alignItems:'center',gap:4,flexShrink:0}}>
+            <StatusDot color={staffingColor} />
+            <span style={{fontSize:12,color:staffingColor,fontWeight:600}}>{staffingLabel}</span>
           </div>
-          <button
-            onClick={()=>exportConnectTeam(displayProjects,assignments,employees)}
-            style={{display:'flex',alignItems:'center',gap:6,padding:'8px 14px',borderRadius:9,border:'1px solid var(--line)',background:'var(--panel)',color:'var(--ink-2)',fontSize:13,fontWeight:600,cursor:'pointer',boxShadow:'var(--shadow-1)'}}>
-            <Download size={13}/> Export to ConnectTeam
-          </button>
         </div>
 
-        {/* Tabs + week nav */}
-        <div style={{display:'flex',alignItems:'center',gap:12}}>
-          <div style={{display:'inline-flex',background:'var(--bg)',border:'1px solid var(--line)',borderRadius:9,padding:2}}>
-            {[['week','This Week'],['all','All Projects']].map(([k,l])=>(
-              <button key={k} onClick={()=>setTab(k)} style={{padding:'5px 12px',borderRadius:7,border:'none',cursor:'pointer',fontSize:12,fontWeight:600,fontFamily:'inherit',background:tab===k?'var(--panel)':'transparent',color:tab===k?'var(--ink-1)':'var(--ink-3)',boxShadow:tab===k?'var(--shadow-1)':'none'}}>{l}</button>
-            ))}
+        {/* Second row */}
+        <div style={{display:'flex',flexWrap:'wrap',gap:'6px 16px',marginBottom:8,fontSize:12,color:'var(--ink-2)'}}>
+          {project.address && (
+            <a
+              href={mapsUrl||'#'} target="_blank" rel="noopener noreferrer"
+              style={{display:'flex',alignItems:'center',gap:4,color:'var(--ink-2)',textDecoration:'none'}}
+              onClick={e=>e.stopPropagation()}
+            >
+              <MapPin size={12} />
+              {project.address}
+            </a>
+          )}
+          <div style={{display:'flex',alignItems:'center',gap:4}}>
+            <Calendar size={12} />
+            {hasNoDates ? (
+              <span style={{color:'#F59E0B',fontWeight:600}}>No dates set</span>
+            ) : (
+              <span>
+                {fmtShort(project.project_start)}{project.project_end && project.project_end !== project.project_start ? ` – ${fmtShort(project.project_end)}` : ''}
+                {projectDays ? ` (${projectDays} day${projectDays!==1?'s':''})` : ''}
+              </span>
+            )}
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:4}}>
+            <Clock size={12} />
+            {hrs} hrs est. · needs {neededCrew} crew
+          </div>
+        </div>
+
+        {/* Crew section */}
+        {assignedCount > 0 ? (
+          <div>
+            <div style={{display:'flex',flexWrap:'wrap',gap:8,marginBottom:6}}>
+              {assignedEmps.map(({emp,eid,i}) => (
+                <div key={eid} style={{display:'flex',flexDirection:'column',alignItems:'center',gap:3}}>
+                  <Avatar name={emp.name} idx={i} size={28} />
+                  <span style={{fontSize:10,color:'var(--ink-2)',maxWidth:52,textAlign:'center',lineHeight:'1.2'}}>
+                    {emp.name.split(' ')[0]}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div style={{
+              display:'flex',alignItems:'center',justifyContent:'space-between',
+              fontSize:12,color:'var(--ink-3)',
+            }}>
+              <span>
+                hours per person: ~{assignedCount > 0 ? Math.round(hrs/assignedCount) : hrs} hrs
+              </span>
+              <button
+                onClick={() => onAssignClick(project.id)}
+                style={{
+                  background:'none', border:'none', color:'var(--accent)',
+                  fontWeight:600, fontSize:12, cursor:'pointer', padding:'2px 4px',
+                }}
+              >
+                Edit
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div>
+            <div style={{fontSize:12,color:'var(--ink-3)',fontStyle:'italic',marginBottom:8}}>
+              No crew assigned
+            </div>
+            {hasNoDates ? (
+              <button
+                onClick={() => onSetDatesClick(project.id)}
+                style={{
+                  width:'100%', padding:'8px 0', borderRadius:8,
+                  background:'#F59E0B', color:'#fff', border:'none',
+                  fontWeight:600, fontSize:13, cursor:'pointer',
+                }}
+              >
+                Set Dates
+              </button>
+            ) : (
+              <button
+                onClick={() => onAssignClick(project.id)}
+                style={{
+                  width:'100%', padding:'8px 0', borderRadius:8,
+                  background:'var(--accent)', color:'#fff', border:'none',
+                  fontWeight:600, fontSize:13, cursor:'pointer',
+                }}
+              >
+                + Assign Crew
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Inline expansions */}
+      {expanded && (
+        <AssignCrewExpansion
+          project={project}
+          employees={employees}
+          employeeTypes={employeeTypes}
+          assignments={assignments}
+          assignmentHours={assignmentHours}
+          projects={projects}
+          onConfirm={onAssignConfirm}
+          onCancel={onAssignCancel}
+        />
+      )}
+      {expandingDates && (
+        <SetDatesExpansion
+          project={project}
+          onSave={onSetDatesSave}
+          onCancel={onSetDatesCancel}
+        />
+      )}
+    </div>
+  )
+}
+
+// ─── Grid View ────────────────────────────────────────────────────────────────
+
+function GridView({
+  weekDates, projects, employees, assignments, assignmentHours,
+  onProjectClick,
+}) {
+  const today = toDateStr(new Date())
+
+  return (
+    <div style={{overflowX:'auto'}}>
+      <table style={{width:'100%', borderCollapse:'collapse', minWidth:700}}>
+        <thead>
+          <tr>
+            <th style={{
+              width:180, padding:'8px 12px', fontSize:12, fontWeight:700,
+              color:'var(--ink-2)', textAlign:'left',
+              borderBottom:'2px solid var(--line)',
+            }}>Employee</th>
+            {weekDates.map(d => {
+              const label = new Date(d+'T00:00:00').toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'})
+              const isToday = d === today
+              return (
+                <th key={d} style={{
+                  width:110, padding:'8px 6px', fontSize:11, fontWeight:700,
+                  color: isToday ? 'var(--accent)' : 'var(--ink-2)',
+                  textAlign:'center', borderBottom:'2px solid var(--line)',
+                  background: isToday ? 'rgba(59,130,246,0.06)' : 'transparent',
+                }}>
+                  {label}
+                </th>
+              )
+            })}
+          </tr>
+        </thead>
+        <tbody>
+          {employees.map((emp, empIdx) => (
+            <tr key={emp.id}>
+              <td style={{
+                padding:'6px 12px', borderBottom:'1px solid var(--line)',
+                background:'var(--panel)',
+              }}>
+                <div style={{display:'flex',alignItems:'center',gap:8}}>
+                  <Avatar name={emp.name} idx={empIdx} size={24} />
+                  <span style={{fontSize:12,fontWeight:600,color:'var(--ink-1)'}}>{emp.name}</span>
+                </div>
+              </td>
+              {weekDates.map(d => {
+                const isToday = d === today
+                // Find projects this employee is on that cover this day
+                const dayProjects = projects.filter(p => {
+                  const pIds = assignments[p.id] || []
+                  if (!pIds.includes(emp.id)) return false
+                  if (!p.project_start) return false
+                  const pEnd = p.project_end || p.project_start
+                  return p.project_start <= d && pEnd >= d
+                })
+                return (
+                  <td key={d} style={{
+                    padding:'4px 4px', borderBottom:'1px solid var(--line)',
+                    background: isToday ? 'rgba(59,130,246,0.06)' : 'transparent',
+                    verticalAlign:'top',
+                    minHeight:40,
+                  }}>
+                    {dayProjects.map(p => (
+                      <div
+                        key={p.id}
+                        onClick={() => onProjectClick(p.id)}
+                        style={{
+                          background: JOB_COLORS[p.job_type] || '#6B7280',
+                          color:'#fff', borderRadius:5,
+                          fontSize:10, fontWeight:600,
+                          padding:'3px 6px', marginBottom:2,
+                          cursor:'pointer', lineHeight:'1.3',
+                          overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
+                        }}
+                        title={p.name}
+                      >
+                        {p.name}
+                      </div>
+                    ))}
+                  </td>
+                )
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+// ─── Crew Availability Panel ──────────────────────────────────────────────────
+
+function AvailabilityPanel({
+  employees, projects, assignments, assignmentHours,
+  weekAnchor, panelWeekOffset, onPanelWeekChange,
+  sortMode, onSortChange,
+  employeeTypes,
+  unavailability,
+}) {
+  const panelAnchor = useMemo(() => {
+    const d = new Date(weekAnchor+'T00:00:00')
+    d.setDate(d.getDate() + panelWeekOffset * 7)
+    return toDateStr(d)
+  }, [weekAnchor, panelWeekOffset])
+
+  const weekDates = useMemo(() => getWeekDates(panelAnchor), [panelAnchor])
+
+  const availability = useMemo(() =>
+    computeAvailability(employees, projects, assignments, assignmentHours, weekDates, unavailability),
+    [employees, projects, assignments, assignmentHours, weekDates, unavailability]
+  )
+
+  const sorted = useMemo(() => {
+    const arr = [...availability]
+    if (sortMode === 'available') arr.sort((a,b) => a.totalHours - b.totalHours)
+    else if (sortMode === 'az') arr.sort((a,b) => a.name.localeCompare(b.name))
+    else if (sortMode === 'team') {
+      arr.sort((a,b) => {
+        const at = (employeeTypes[a.id]||[])[0]?.name || 'zzz'
+        const bt = (employeeTypes[b.id]||[])[0]?.name || 'zzz'
+        return at.localeCompare(bt) || a.name.localeCompare(b.name)
+      })
+    }
+    return arr
+  }, [availability, sortMode, employeeTypes])
+
+  const totalBooked = sorted.reduce((s,e)=>s+e.totalHours,0)
+  const totalCap = employees.reduce((s, e) => s + (e.capacity ?? 40), 0)
+  const capPct = totalCap > 0 ? Math.round(totalBooked / totalCap * 100) : 0
+  const capColor = capPct < 60 ? '#22C55E' : capPct < 90 ? '#F59E0B' : '#EF4444'
+
+  const btnStyle = (active) => ({
+    background:'none', border:'none', fontWeight: active?700:400,
+    color: active ? 'var(--accent)' : 'var(--ink-3)',
+    fontSize:12, cursor:'pointer', padding:'2px 6px',
+  })
+
+  return (
+    <div style={{
+      background:'var(--bg)', border:'1px solid var(--line)',
+      borderRadius:12, padding:16,
+    }}>
+      <div style={{fontWeight:700,fontSize:14,color:'var(--ink-1)',marginBottom:8}}>
+        Team Availability
+      </div>
+
+      {/* Week toggle */}
+      <div style={{display:'flex',gap:4,marginBottom:8}}>
+        <button onClick={()=>onPanelWeekChange(0)} style={btnStyle(panelWeekOffset===0)}>
+          This Week
+        </button>
+        <span style={{color:'var(--ink-4)',fontSize:12}}>|</span>
+        <button onClick={()=>onPanelWeekChange(1)} style={btnStyle(panelWeekOffset===1)}>
+          Next Week
+        </button>
+      </div>
+
+      {/* Sort toggle */}
+      <div style={{display:'flex',gap:4,marginBottom:12,flexWrap:'wrap'}}>
+        <button onClick={()=>onSortChange('available')} style={btnStyle(sortMode==='available')}>
+          Most Available
+        </button>
+        <span style={{color:'var(--ink-4)',fontSize:12}}>|</span>
+        <button onClick={()=>onSortChange('az')} style={btnStyle(sortMode==='az')}>
+          A-Z
+        </button>
+        <span style={{color:'var(--ink-4)',fontSize:12}}>|</span>
+        <button onClick={()=>onSortChange('team')} style={btnStyle(sortMode==='team')}>
+          By Team
+        </button>
+      </div>
+
+      {/* Employee cards */}
+      {sorted.map((emp, empIdx) => {
+        const booked = emp.totalHours
+        const empCap = emp.capacity ?? 40
+        const barColor = booked < empCap * 0.75 ? '#22C55E' : booked < empCap ? '#F59E0B' : '#EF4444'
+        const barPct = Math.min(100, Math.round(booked / empCap * 100))
+        const types = employeeTypes[emp.id] || []
+
+        // Get project names per day for tooltip
+        const dayProjectNames = {}
+        for (const p of projects) {
+          const pIds = assignments[p.id] || []
+          if (!pIds.includes(emp.id)) continue
+          if (!p.project_start) continue
+          const pEnd = p.project_end || p.project_start
+          for (const d of weekDates) {
+            if (p.project_start <= d && pEnd >= d) {
+              if (!dayProjectNames[d]) dayProjectNames[d] = []
+              dayProjectNames[d].push(p.name)
+            }
+          }
+        }
+
+        return (
+          <div key={emp.id} style={{
+            background:'var(--panel)', borderRadius:9,
+            padding:'10px 12px', marginBottom:8,
+          }}>
+            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:6}}>
+              <Avatar name={emp.name} idx={empIdx} size={32} />
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:13,fontWeight:700,color:'var(--ink-1)'}}>{emp.name}</div>
+                <div style={{fontSize:11,color:'var(--ink-3)'}}>{emp.role}</div>
+              </div>
+              {/* Type dots */}
+              <div style={{display:'flex',gap:3,flexShrink:0}}>
+                {types.map(t => (
+                  <span
+                    key={t.id}
+                    title={t.name}
+                    style={{
+                      display:'inline-block', width:8, height:8, borderRadius:'50%',
+                      background: JOB_COLORS[t.name] || '#6B7280',
+                      cursor:'help',
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Hours bar */}
+            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:6}}>
+              <div style={{
+                flex:1, height:6, borderRadius:999,
+                background:'var(--line)', overflow:'hidden',
+              }}>
+                <div style={{
+                  height:'100%', width:`${barPct}%`,
+                  background:barColor, borderRadius:999,
+                  transition:'width 300ms ease',
+                }} />
+              </div>
+              <span style={{fontSize:11,color:barColor,fontWeight:600,flexShrink:0}}>
+                {booked} / {empCap} hrs
+              </span>
+            </div>
+
+            {/* Daily dots */}
+            <div>
+              <div style={{display:'flex',gap:4}}>
+                {weekDates.map((d, di) => {
+                  const dayHrs = emp.dailyHours[d] || 0
+                  const isNonWorkDay = (emp.nonWorkDays || []).includes(d)
+                  const dotColor = isNonWorkDay ? 'var(--line)' :
+                    dayHrs === 0 ? '#22C55E' :
+                    dayHrs < 8   ? '#F59E0B' :
+                                   '#EF4444'
+                  const tooltip = isNonWorkDay ? 'Non-work day' : (dayProjectNames[d]?.join(', ') || 'Free')
+                  return (
+                    <div
+                      key={d}
+                      title={`${DAY_LABELS[di]}: ${tooltip} (${Math.round(dayHrs*10)/10} hrs)`}
+                      style={{
+                        width:14, height:14, borderRadius:'50%',
+                        background:dotColor, cursor:'help',
+                      }}
+                    />
+                  )
+                })}
+              </div>
+              <div style={{display:'flex',gap:4,marginTop:2}}>
+                {DAY_LABELS.map((l,i)=>(
+                  <span key={i} style={{
+                    width:14, textAlign:'center', fontSize:9,
+                    color:'var(--ink-4)', display:'block',
+                  }}>{l}</span>
+                ))}
+              </div>
+            </div>
+          </div>
+        )
+      })}
+
+      {/* Team total */}
+      <div style={{
+        borderTop:'1px solid var(--line)', paddingTop:10, marginTop:4,
+      }}>
+        <div style={{
+          display:'flex',justifyContent:'space-between',
+          fontSize:12, fontWeight:700, color:'var(--ink-1)', marginBottom:6,
+        }}>
+          <span>Team Total</span>
+          <span style={{color:capColor}}>{capPct}%</span>
+        </div>
+        <div style={{
+          height:8, borderRadius:999, background:'var(--line)',
+          overflow:'hidden', marginBottom:6,
+        }}>
+          <div style={{
+            height:'100%', width:`${capPct}%`, background:capColor,
+            borderRadius:999, transition:'width 300ms ease',
+          }} />
+        </div>
+        <div style={{fontSize:12,color:'var(--ink-2)',marginBottom:2}}>
+          {Math.round(totalBooked)} / {totalCap} hrs ({capPct}%)
+        </div>
+        <div style={{fontSize:12,fontWeight:600,color:capColor}}>
+          {Math.round(totalCap - totalBooked)} hrs available this week
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Setup banner ─────────────────────────────────────────────────────────────
+
+function SetupBanner({ onDismiss, onGoToEmployees }) {
+  return (
+    <div style={{
+      background:'#FAEEDA', border:'1px solid #ECD5A4',
+      borderRadius:10, padding:'12px 16px', marginBottom:16,
+      display:'flex', alignItems:'flex-start', gap:12,
+    }}>
+      <Users size={20} color="#D97706" style={{flexShrink:0, marginTop:2}} />
+      <div style={{flex:1}}>
+        <div style={{fontWeight:700,fontSize:13,color:'#92400E',marginBottom:4}}>
+          Add your team to start scheduling
+        </div>
+        <div style={{fontSize:12,color:'#B45309',lineHeight:'1.5',marginBottom:8}}>
+          You need at least 3 employees to use crew scheduling effectively.
+          Add your team members, their roles, and hourly rates first.
+        </div>
+        <button
+          onClick={onGoToEmployees}
+          style={{
+            background:'#D97706', color:'#fff', border:'none',
+            borderRadius:7, padding:'6px 14px', fontWeight:600,
+            fontSize:12, cursor:'pointer',
+          }}
+        >
+          Go to Employees →
+        </button>
+      </div>
+      <button
+        onClick={onDismiss}
+        style={{background:'none',border:'none',cursor:'pointer',color:'#92400E',padding:2}}
+      >
+        <X size={16} />
+      </button>
+    </div>
+  )
+}
+
+// ─── Main page ────────────────────────────────────────────────────────────────
+
+export default function CrewSchedule() {
+  const navigate = useNavigate()
+  const { user, organizationId } = useAuth()
+
+  // ── State ──
+  const today = toDateStr(new Date())
+  const [weekAnchor, setWeekAnchor] = useState(() => getSundayOfWeek(today))
+  const [viewMode, setViewMode] = useState('cards') // 'cards' | 'grid'
+  const [assignments, setAssignments] = useState({})
+  const [assignmentHours, setAssignmentHours] = useState({})
+  const [expandedProject, setExpandedProject] = useState(null)
+  const [expandingDates, setExpandingDates] = useState(null)
+  const [availabilityWeekOffset, setAvailabilityWeekOffset] = useState(0)
+  const [sortMode, setSortMode] = useState('available')
+  const [upcomingExpanded, setUpcomingExpanded] = useState(false)
+  const [toast, setToast] = useState(null)
+  const [setupDismissed, setSetupDismissed] = useState(
+    () => sessionStorage.getItem('crew_setup_dismissed') === '1'
+  )
+  // Store projects locally so we can update dates
+  const [localProjects, setLocalProjects] = useState(null)
+
+  // ── Data load ──
+  const { data, loading, error } = useSupabaseQuery(async () => {
+    const [pRes, eRes, etRes, paRes, unavailRes] = await Promise.all([
+      supabase.from('leads').select('*')
+        .in('status', ['Project Accepted','Project Scheduled','Won'])
+        .order('project_start', {ascending:true, nullsFirst:false}),
+      supabase.from('employees').select('*').eq('active', true).order('name'),
+      supabase.from('employee_project_types').select('employee_id, project_type_id, project_types(name)'),
+      supabase.from('project_assignments').select('lead_id, employee_id, estimated_hours'),
+      Promise.resolve(supabase.from('employee_unavailability').select('*')
+        .gte('end_date', new Date().toISOString().split('T')[0])).catch(() => ({ data: [] })),
+    ])
+    if (pRes.error) throw pRes.error
+    if (eRes.error) throw eRes.error
+
+    const employeeTypes = {}
+    for (const r of (etRes.data||[])) {
+      if (!employeeTypes[r.employee_id]) employeeTypes[r.employee_id] = []
+      employeeTypes[r.employee_id].push({ id: r.project_type_id, name: r.project_types?.name })
+    }
+
+    const dbAssignments = {}
+    const dbAssignmentHours = {}
+    for (const r of (paRes.data||[])) {
+      if (!dbAssignments[r.lead_id]) dbAssignments[r.lead_id] = []
+      dbAssignments[r.lead_id].push(r.employee_id)
+      if (!dbAssignmentHours[r.lead_id]) dbAssignmentHours[r.lead_id] = {}
+      dbAssignmentHours[r.lead_id][r.employee_id] = r.estimated_hours || 0
+    }
+
+    return {
+      projects: pRes.data || [],
+      employees: eRes.data || [],
+      employeeTypes,
+      dbAssignments,
+      dbAssignmentHours,
+      unavailability: unavailRes?.data || [],
+    }
+  })
+
+  useEffect(() => {
+    if (data) {
+      setAssignments(data.dbAssignments)
+      setAssignmentHours(data.dbAssignmentHours)
+      setLocalProjects(data.projects)
+    }
+  }, [data])
+
+  // Toast helper
+  function showToast(message, type = 'success') {
+    setToast({ message, type })
+    setTimeout(() => setToast(null), 3000)
+  }
+
+  // ── Derived data ──
+  const projects = localProjects || data?.projects || []
+  const employees = data?.employees || []
+  const employeeTypes = data?.employeeTypes || {}
+  const unavailability = data?.unavailability ?? []
+
+  const weekDates = useMemo(() => getWeekDates(weekAnchor), [weekAnchor])
+  const weekStart = weekDates[0]
+  const weekEnd = weekDates[6]
+
+  const nextWeekAnchor = useMemo(() => toDateStr(addDays(new Date(weekAnchor+'T00:00:00'), 7)), [weekAnchor])
+  const nextWeekDates = useMemo(() => getWeekDates(nextWeekAnchor), [nextWeekAnchor])
+  const nextWeekStart = nextWeekDates[0]
+  const nextWeekEnd = nextWeekDates[6]
+
+  // Group projects
+  const { thisWeek, nextWeek, upcoming, needsDates } = useMemo(() => {
+    const thisWeek = [], nextWeek = [], upcoming = [], needsDates = []
+    for (const p of projects) {
+      if (!p.project_start) { needsDates.push(p); continue }
+      const pEnd = p.project_end || p.project_start
+      const overlapsThis = p.project_start <= weekEnd && pEnd >= weekStart
+      const overlapsNext = p.project_start <= nextWeekEnd && pEnd >= nextWeekStart
+      if (overlapsThis) thisWeek.push(p)
+      else if (overlapsNext) nextWeek.push(p)
+      else upcoming.push(p)
+    }
+    return { thisWeek, nextWeek, upcoming, needsDates }
+  }, [projects, weekStart, weekEnd, nextWeekStart, nextWeekEnd])
+
+  // ── Event handlers ──
+  function handleWeekNav(dir) {
+    setWeekAnchor(prev => toDateStr(addDays(new Date(prev+'T00:00:00'), dir * 7)))
+  }
+
+  function handleAssignClick(pid) {
+    setExpandedProject(prev => prev === pid ? null : pid)
+    setExpandingDates(null)
+  }
+
+  function handleAssignConfirm(pid, empIds, hoursMap, err) {
+    if (err) {
+      showToast('Failed to save crew assignment', 'error')
+      return
+    }
+    const p = projects.find(x=>x.id===pid)
+    setAssignments(prev => ({ ...prev, [pid]: empIds }))
+    setAssignmentHours(prev => ({ ...prev, [pid]: hoursMap }))
+    setExpandedProject(null)
+    showToast(`Crew assigned to ${p?.name || 'project'}`, 'success')
+  }
+
+  function handleAssignCancel() {
+    setExpandedProject(null)
+  }
+
+  function handleSetDatesClick(pid) {
+    setExpandingDates(prev => prev === pid ? null : pid)
+    setExpandedProject(null)
+  }
+
+  function handleSetDatesSave(pid, startDate, endDate) {
+    setLocalProjects(prev =>
+      (prev||[]).map(p => p.id === pid ? { ...p, project_start: startDate, project_end: endDate } : p)
+    )
+    setExpandingDates(null)
+    showToast('Dates saved', 'success')
+  }
+
+  function handleSetDatesCancel() {
+    setExpandingDates(null)
+  }
+
+  function handleDismissSetup() {
+    sessionStorage.setItem('crew_setup_dismissed', '1')
+    setSetupDismissed(true)
+  }
+
+  // ── Render helpers ──
+  function renderProjectCard(p) {
+    return (
+      <ProjectCard
+        key={p.id}
+        project={p}
+        idx={0}
+        employees={employees}
+        employeeTypes={employeeTypes}
+        assignments={assignments}
+        assignmentHours={assignmentHours}
+        projects={projects}
+        expanded={expandedProject === p.id}
+        expandingDates={expandingDates === p.id}
+        onAssignClick={handleAssignClick}
+        onAssignConfirm={handleAssignConfirm}
+        onAssignCancel={handleAssignCancel}
+        onSetDatesClick={handleSetDatesClick}
+        onSetDatesSave={handleSetDatesSave}
+        onSetDatesCancel={handleSetDatesCancel}
+      />
+    )
+  }
+
+  // ── Skeleton ──
+  if (loading) {
+    return (
+      <div style={{padding:'24px 16px', maxWidth:1200, margin:'0 auto'}}>
+        <style>{`@keyframes pulse { 0%,100%{opacity:0.5} 50%{opacity:0.8} }`}</style>
+        <div style={{display:'flex',gap:24,flexWrap:'wrap'}}>
+          <div style={{flex:'1 1 60%',minWidth:280}}>
+            {[1,2,3].map(i=><SkeletonBox key={i} height={120} />)}
+          </div>
+          <div style={{flex:'1 1 35%',minWidth:220}}>
+            {[1,2,3,4].map(i=><SkeletonBox key={i} height={72} />)}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div style={{padding:32, color:'var(--lose)', textAlign:'center'}}>
+        Failed to load crew schedule: {error.message}
+      </div>
+    )
+  }
+
+  const activeProjectCount = projects.length
+  const activeCrewCount = employees.length
+
+  return (
+    <div style={{padding:'24px 16px', maxWidth:1280, margin:'0 auto'}}>
+      <style>{`
+        @keyframes pulse { 0%,100%{opacity:0.5} 50%{opacity:0.8} }
+        @media (max-width:768px) {
+          .crew-split { flex-direction: column !important; }
+          .crew-right { position: static !important; max-height: none !important; }
+        }
+      `}</style>
+
+      {/* Page header */}
+      <div style={{
+        display:'flex', alignItems:'flex-start', justifyContent:'space-between',
+        gap:16, flexWrap:'wrap', marginBottom:20,
+      }}>
+        <div>
+          <h1 style={{fontSize:24,fontWeight:800,color:'var(--ink-1)',margin:0,marginBottom:4}}>
+            Crew Schedule
+          </h1>
+          <div style={{fontSize:14,color:'var(--ink-3)'}}>
+            {activeProjectCount} active project{activeProjectCount!==1?'s':''} · {activeCrewCount} active crew member{activeCrewCount!==1?'s':''}
+          </div>
+        </div>
+        <button
+          onClick={() => exportConnectTeam(projects, assignments, employees)}
+          style={{
+            display:'flex', alignItems:'center', gap:8,
+            background:'var(--accent)', color:'#fff', border:'none',
+            borderRadius:9, padding:'9px 16px', fontWeight:600,
+            fontSize:13, cursor:'pointer',
+          }}
+        >
+          <Download size={15} />
+          Export to ConnectTeam
+        </button>
+      </div>
+
+      {/* Setup banner */}
+      {!setupDismissed && employees.length < 3 && (
+        <SetupBanner
+          onDismiss={handleDismissSetup}
+          onGoToEmployees={() => navigate('/employees')}
+        />
+      )}
+
+      {/* Split layout */}
+      <div className="crew-split" style={{display:'flex',gap:20,alignItems:'flex-start'}}>
+        {/* LEFT */}
+        <div style={{flex:'1 1 60%', minWidth:0}}>
+
+          {/* Week navigator */}
+          <div style={{
+            display:'flex', alignItems:'center', gap:10,
+            marginBottom:16, flexWrap:'wrap',
+          }}>
+            <div style={{display:'flex',alignItems:'center',gap:6,flex:1,minWidth:200}}>
+              <button
+                onClick={() => handleWeekNav(-1)}
+                style={{
+                  background:'var(--panel)', border:'1px solid var(--line)',
+                  borderRadius:7, padding:'5px 8px', cursor:'pointer',
+                  color:'var(--ink-2)', display:'flex', alignItems:'center',
+                }}
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <span style={{
+                fontSize:14, fontWeight:600, color:'var(--ink-1)',
+                flex:1, textAlign:'center',
+              }}>
+                {getWeekLabel(weekAnchor)}
+              </span>
+              <button
+                onClick={() => handleWeekNav(1)}
+                style={{
+                  background:'var(--panel)', border:'1px solid var(--line)',
+                  borderRadius:7, padding:'5px 8px', cursor:'pointer',
+                  color:'var(--ink-2)', display:'flex', alignItems:'center',
+                }}
+              >
+                <ChevronRight size={16} />
+              </button>
+              <button
+                onClick={() => setWeekAnchor(getSundayOfWeek(today))}
+                style={{
+                  background:'var(--panel)', border:'1px solid var(--line)',
+                  borderRadius:7, padding:'5px 12px', fontSize:12,
+                  fontWeight:600, cursor:'pointer', color:'var(--ink-2)',
+                }}
+              >
+                Today
+              </button>
+            </div>
+
+            {/* View toggle */}
+            <div style={{
+              display:'flex', gap:0,
+              border:'1px solid var(--line)', borderRadius:8, overflow:'hidden',
+            }}>
+              <button
+                onClick={() => setViewMode('cards')}
+                style={{
+                  padding:'5px 12px', fontSize:12, fontWeight:600,
+                  border:'none', cursor:'pointer',
+                  background: viewMode==='cards' ? 'var(--accent)' : 'var(--panel)',
+                  color: viewMode==='cards' ? '#fff' : 'var(--ink-2)',
+                  display:'flex', alignItems:'center', gap:4,
+                }}
+              >
+                <List size={13} /> Cards
+              </button>
+              <button
+                onClick={() => setViewMode('grid')}
+                style={{
+                  padding:'5px 12px', fontSize:12, fontWeight:600,
+                  border:'none', cursor:'pointer',
+                  background: viewMode==='grid' ? 'var(--accent)' : 'var(--panel)',
+                  color: viewMode==='grid' ? '#fff' : 'var(--ink-2)',
+                  display:'flex', alignItems:'center', gap:4,
+                }}
+              >
+                <LayoutGrid size={13} /> Grid
+              </button>
+            </div>
           </div>
 
-          {tab==='week' && (
-            <div style={{display:'flex',alignItems:'center',gap:8}}>
-              <button onClick={()=>setWeekAnchor(toDateStr(addDays(new Date(weekAnchor+'T00:00:00'),-7)))} style={{width:28,height:28,borderRadius:7,border:'1px solid var(--line)',background:'var(--panel)',cursor:'pointer',display:'grid',placeItems:'center',color:'var(--ink-3)'}}>
-                <ChevronLeft size={14}/>
-              </button>
-              <span style={{fontSize:12.5,fontWeight:600,color:'var(--ink-2)',whiteSpace:'nowrap'}}>
-                {fmtShort(weekDates[0])} – {fmtShort(weekDates[6])}
-              </span>
-              <button onClick={()=>setWeekAnchor(toDateStr(addDays(new Date(weekAnchor+'T00:00:00'),7)))} style={{width:28,height:28,borderRadius:7,border:'1px solid var(--line)',background:'var(--panel)',cursor:'pointer',display:'grid',placeItems:'center',color:'var(--ink-3)'}}>
-                <ChevronRight size={14}/>
-              </button>
-              <button onClick={()=>setWeekAnchor(toDateStr(new Date()))} style={{padding:'4px 10px',borderRadius:7,border:'1px solid var(--line)',background:'var(--panel)',cursor:'pointer',fontSize:11.5,fontWeight:600,color:'var(--ink-3)',fontFamily:'inherit'}}>
-                Today
+          {viewMode === 'grid' ? (
+            <GridView
+              weekDates={weekDates}
+              projects={projects}
+              employees={employees}
+              assignments={assignments}
+              assignmentHours={assignmentHours}
+              onProjectClick={handleAssignClick}
+            />
+          ) : (
+            <>
+              {/* This Week */}
+              <SectionHeader label="This Week" count={thisWeek.length} />
+              {thisWeek.length === 0 ? (
+                <p style={{fontSize:13,color:'var(--ink-4)',fontStyle:'italic',marginBottom:12}}>
+                  No projects this week
+                </p>
+              ) : thisWeek.map(renderProjectCard)}
+
+              {/* Next Week */}
+              <SectionHeader label="Next Week" count={nextWeek.length} />
+              {nextWeek.length === 0 ? (
+                <p style={{fontSize:13,color:'var(--ink-4)',fontStyle:'italic',marginBottom:12}}>
+                  No projects next week
+                </p>
+              ) : nextWeek.map(renderProjectCard)}
+
+              {/* Upcoming */}
+              {(upcoming.length > 0 || true) && (
+                <>
+                  <SectionHeader
+                    label={`Upcoming (${upcoming.length})`}
+                    count={null}
+                    onToggle={upcoming.length > 0 ? () => setUpcomingExpanded(p=>!p) : undefined}
+                    expanded={upcomingExpanded}
+                  />
+                  {upcomingExpanded && (
+                    upcoming.length === 0 ? (
+                      <p style={{fontSize:13,color:'var(--ink-4)',fontStyle:'italic',marginBottom:12}}>
+                        No upcoming projects
+                      </p>
+                    ) : upcoming.map(renderProjectCard)
+                  )}
+                </>
+              )}
+
+              {/* Needs Dates */}
+              {needsDates.length > 0 && (
+                <>
+                  <SectionHeader label="Needs Dates" count={needsDates.length} />
+                  {needsDates.map(renderProjectCard)}
+                </>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* RIGHT */}
+        <div
+          className="crew-right"
+          style={{
+            flex:'1 1 35%', minWidth:220,
+            position:'sticky', top:80,
+            maxHeight:'calc(100vh - 100px)',
+            overflowY:'auto',
+          }}
+        >
+          {employees.length > 0 ? (
+            <AvailabilityPanel
+              employees={employees}
+              projects={projects}
+              assignments={assignments}
+              assignmentHours={assignmentHours}
+              weekAnchor={weekAnchor}
+              panelWeekOffset={availabilityWeekOffset}
+              onPanelWeekChange={setAvailabilityWeekOffset}
+              sortMode={sortMode}
+              onSortChange={setSortMode}
+              employeeTypes={employeeTypes}
+              unavailability={unavailability}
+            />
+          ) : (
+            <div style={{
+              background:'var(--bg)', border:'1px solid var(--line)',
+              borderRadius:12, padding:24, textAlign:'center',
+              color:'var(--ink-3)', fontSize:13,
+            }}>
+              <Users size={32} color="var(--ink-4)" style={{marginBottom:8}} />
+              <div>No active employees found.</div>
+              <button
+                onClick={() => navigate('/employees')}
+                style={{
+                  marginTop:12, background:'var(--accent)', color:'#fff',
+                  border:'none', borderRadius:8, padding:'7px 16px',
+                  fontWeight:600, fontSize:12, cursor:'pointer',
+                }}
+              >
+                Add Employees
               </button>
             </div>
           )}
         </div>
-
-        {/* Day header row */}
-        {tab==='week' && (
-          <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:4,marginTop:10}}>
-            {weekDates.map(d=>{
-              const isToday = d===toDateStr(new Date())
-              const hasProjects = projectsInWeek.some(p=>{
-                const end = p.end_date||p.start_date
-                return p.start_date && d>=p.start_date && d<=(end||p.start_date)
-              })
-              return (
-                <div key={d} style={{textAlign:'center',padding:'5px 4px',borderRadius:8,background:isToday?'var(--accent-soft)':'transparent',border:isToday?'1px solid var(--accent)':'1px solid transparent'}}>
-                  <div style={{fontSize:9.5,fontWeight:700,color:isToday?'var(--accent)':'var(--ink-4)',textTransform:'uppercase',letterSpacing:'0.05em'}}>
-                    {new Date(d+'T00:00:00').toLocaleDateString([],{weekday:'short'})}
-                  </div>
-                  <div style={{fontSize:13,fontWeight:700,color:isToday?'var(--accent)':'var(--ink-2)'}}>
-                    {new Date(d+'T00:00:00').getDate()}
-                  </div>
-                  {hasProjects && <div style={{width:4,height:4,borderRadius:'50%',background:isToday?'var(--accent)':'var(--ink-3)',margin:'2px auto 0'}}/>}
-                </div>
-              )
-            })}
-          </div>
-        )}
       </div>
 
-      {/* Content */}
-      <div style={{flex:1,overflowY:'auto',padding:'16px 24px'}}>
-        {loading ? (
-          <div style={{color:'var(--ink-3)',fontSize:14}}>Loading projects…</div>
-        ) : displayProjects.length===0 ? (
-          <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:200,gap:8,color:'var(--ink-3)'}}>
-            <Calendar size={36} color="var(--line)"/>
-            <div style={{fontSize:14}}>{tab==='week'?'No projects this week.':'No active projects.'}</div>
-            <div style={{fontSize:12.5}}>Projects move here when marked "Project Accepted" or "Project Scheduled".</div>
-          </div>
-        ) : (
-          <div style={{display:'flex',flexDirection:'column',gap:10}}>
-            {displayProjects.map(p=>(
-              <ProjectRow
-                key={p.id}
-                project={p}
-                employees={employees}
-                employeeTypes={employeeTypes}
-                assignment={assignments[p.id]}
-                onAssign={()=>setAssigningProject(p)}
-                weekDates={tab==='week'?weekDates:null}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-
-      {assigningProject && (
-        <AssignCrewModal
-          project={assigningProject}
-          employees={employees}
-          employeeTypes={employeeTypes}
-          currentAssignment={assignments[assigningProject.id]}
-          onClose={()=>setAssigningProject(null)}
-          onSave={empIds=>handleSaveAssignment(assigningProject.id, empIds)}
-        />
-      )}
+      {/* Toast */}
+      <Toast message={toast?.message} type={toast?.type} />
     </div>
   )
 }

@@ -17,9 +17,9 @@ const STEPS = [
     id: 'pipeline',
     title: 'Pipeline',
     body: 'Every new lead lands here. Drag cards between stages — New Lead → Contacted → Consult Scheduled → Won. Click a card to open the full detail drawer.',
-    target: 'a[href="/"]',
+    target: 'a[href="/pipeline"]',
     placement: 'right',
-    route: '/',
+    route: '/pipeline',
   },
   {
     id: 'deal-scorer',

@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useRef } from 'react'
 import { Plus, Search, X, Upload, FileText, Star, BookOpen, ClipboardList, Megaphone, Scale, FolderOpen, Pin, MoreHorizontal, Download, ExternalLink } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
+import { useSupabaseQuery } from '../lib/useSupabaseQuery'
 
 const DOC_TYPES = ['SOP', 'Contract', 'Checklist', 'Marketing', 'Legal', 'Other']
 
@@ -266,8 +267,6 @@ function DocCard({ asset, onOpen, onStar, starred }) {
 
 export default function Library() {
   const { organizationId } = useAuth()
-  const [assets, setAssets] = useState([])
-  const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [navKey, setNavKey] = useState('All')
   const [showModal, setShowModal] = useState(false)
@@ -275,14 +274,11 @@ export default function Library() {
   const [starred, setStarred] = useState(new Set())
   const [previewAsset, setPreviewAsset] = useState(null)
 
-  useEffect(() => { fetchAssets() }, [])
-
-  async function fetchAssets() {
-    setLoading(true)
-    const { data } = await supabase.from('library_assets').select('*').order('created_at', { ascending: false })
-    setAssets(data || [])
-    setLoading(false)
-  }
+  const { data: assets = [], loading, error, refetch: refetchAssets } = useSupabaseQuery(async () => {
+    const { data, error } = await supabase.from('library_assets').select('*').order('created_at', { ascending: false })
+    if (error) throw error
+    return data || []
+  }, [], { errorMessage: 'Failed to load library. Please try again.' })
 
   async function handleSave(payload) {
     if (payload.id) {
@@ -292,7 +288,7 @@ export default function Library() {
       const { error } = await supabase.from('library_assets').insert({ ...payload, organization_id: organizationId })
       if (error) throw new Error(error.message)
     }
-    await fetchAssets()
+    await refetchAssets()
   }
 
   function countByType(key) {
@@ -422,7 +418,9 @@ export default function Library() {
 
         {/* Document grid */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
-          {loading ? (
+          {error ? (
+            <div style={{ textAlign: 'center', color: 'var(--lose)', fontSize: 13, marginTop: 60 }}>{error}</div>
+          ) : loading ? (
             <div style={{ textAlign: 'center', color: 'var(--ink-3)', fontSize: 13, marginTop: 60 }}>Loading documents…</div>
           ) : filtered.length === 0 ? (
             <div style={{ textAlign: 'center', color: 'var(--ink-3)', fontSize: 13, marginTop: 60 }}>

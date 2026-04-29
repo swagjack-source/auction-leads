@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useRef } from 'react'
 import { Plus, Upload, Phone, Mail, X, ChevronDown, Search, Users, Handshake } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
+import { useSupabaseQuery } from '../lib/useSupabaseQuery'
 
 // ── Constants ──────────────────────────────────────────────────
 
@@ -420,8 +421,6 @@ function BDRColumn({ stage, contacts, onCardClick }) {
 
 export default function BDR() {
   const { organizationId } = useAuth()
-  const [contacts, setContacts] = useState([])
-  const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState('All')
   const [stageFilter, setStageFilter] = useState('All')
@@ -431,24 +430,24 @@ export default function BDR() {
   const [selected, setSelected] = useState(null)
   const fileRef = useRef()
 
-  useEffect(() => { if (organizationId) fetchContacts() }, [organizationId])
-
-  async function fetchContacts() {
-    setLoading(true)
-    const { data } = await supabase
-      .from('bdr_contacts')
-      .select('*')
-      .order('name')
-    setContacts(data || [])
-    setLoading(false)
-  }
+  const {
+    data: contacts = [],
+    loading,
+    error,
+    refetch: refetchContacts,
+    mutate: mutateContacts,
+  } = useSupabaseQuery(async () => {
+    const { data, error } = await supabase.from('bdr_contacts').select('*').order('name')
+    if (error) throw error
+    return data || []
+  }, [organizationId], { enabled: !!organizationId, errorMessage: 'Failed to load BDR contacts. Please try again.' })
 
   async function addContact(form) {
     const { data } = await supabase.from('bdr_contacts')
       .insert({ ...form, org_id: organizationId })
       .select().single()
     if (data) {
-      setContacts(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)))
+      mutateContacts(prev => [...(prev || []), data].sort((a, b) => a.name.localeCompare(b.name)))
       setShowAdd(false)
     }
   }
@@ -459,14 +458,14 @@ export default function BDR() {
       .update({ ...rest, updated_at: new Date().toISOString() })
       .eq('id', id).select().single()
     if (data) {
-      setContacts(prev => prev.map(c => c.id === id ? data : c))
+      mutateContacts(prev => (prev || []).map(c => c.id === id ? data : c))
       setSelected(data)
     }
   }
 
   async function deleteContact(id) {
     await supabase.from('bdr_contacts').delete().eq('id', id)
-    setContacts(prev => prev.filter(c => c.id !== id))
+    mutateContacts(prev => (prev || []).filter(c => c.id !== id))
     setSelected(null)
   }
 
@@ -521,7 +520,7 @@ export default function BDR() {
       const { error } = await supabase.from('bdr_contacts').insert(contacts)
       if (error) { alert(`Import failed: ${error.message}`); return }
       alert(`Imported ${contacts.length} contacts successfully.`)
-      fetchContacts()
+      refetchContacts()
     } catch (err) {
       alert(`Failed to read file: ${err.message}`)
     }
@@ -677,7 +676,9 @@ export default function BDR() {
       {/* Board view */}
       {view === 'board' && (
         <div style={{ flex: 1, overflow: 'auto', padding: '16px 24px' }}>
-          {loading ? (
+          {error ? (
+            <div style={{ color: 'var(--lose)', fontSize: 13, padding: 20 }}>{error}</div>
+          ) : loading ? (
             <div style={{ color: 'var(--ink-4)', fontSize: 13, padding: 20 }}>Loading…</div>
           ) : (
             <div style={{ display: 'flex', gap: 14, minWidth: 'max-content', alignItems: 'flex-start', paddingBottom: 24 }}>
@@ -692,7 +693,9 @@ export default function BDR() {
       {/* List view */}
       {view === 'list' && (
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px 24px' }}>
-          {loading ? (
+          {error ? (
+            <div style={{ color: 'var(--lose)', fontSize: 13 }}>{error}</div>
+          ) : loading ? (
             <div style={{ color: 'var(--ink-4)', fontSize: 13 }}>Loading…</div>
           ) : (
             <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 12, overflow: 'hidden' }}>

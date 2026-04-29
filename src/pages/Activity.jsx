@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Bell, UserPlus, ArrowRight, Gavel, TrendingUp, CheckCircle, Clock } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { useSupabaseQuery } from '../lib/useSupabaseQuery'
 
 const TYPE_META = {
   new_lead:        { icon: UserPlus,     color: '#4A6FA5', soft: 'rgba(74,111,165,0.12)',  label: 'New Lead'         },
@@ -96,23 +97,17 @@ function ActivityItem({ item }) {
 }
 
 export default function Activity() {
-  const [events, setEvents] = useState([])
-  const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('All')
 
-  useEffect(() => {
-    async function load() {
-      setLoading(true)
-      const { data } = await supabase
-        .from('leads')
-        .select('id, name, address, job_type, status, deal_score, created_at, updated_at')
-        .order('created_at', { ascending: false })
-        .range(0, 199)
-      setEvents(buildActivityFromLeads(data || []))
-      setLoading(false)
-    }
-    load()
-  }, [])
+  const { data: events = [], loading, error } = useSupabaseQuery(async () => {
+    const { data, error } = await supabase
+      .from('leads')
+      .select('id, name, address, job_type, status, deal_score, created_at, updated_at')
+      .order('created_at', { ascending: false })
+      .range(0, 199)
+    if (error) throw error
+    return buildActivityFromLeads(data || [])
+  }, [], { errorMessage: 'Failed to load activity. Please try again.' })
 
   const visible = filter === 'All'
     ? events
@@ -155,7 +150,9 @@ export default function Activity() {
 
       {/* Feed */}
       <div style={{ flex: 1, background: 'var(--panel)', borderRadius: 0 }}>
-        {loading ? (
+        {error ? (
+          <div style={{ padding: 40, textAlign: 'center', color: 'var(--lose)', fontSize: 13 }}>{error}</div>
+        ) : loading ? (
           <div style={{ padding: 40, textAlign: 'center', color: 'var(--ink-4)', fontSize: 13 }}>Loading activity…</div>
         ) : visible.length === 0 ? (
           <div style={{ padding: 60, textAlign: 'center', color: 'var(--ink-4)' }}>

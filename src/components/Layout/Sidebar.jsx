@@ -19,7 +19,7 @@ function NavItem({ to, icon: Icon, label, badge, mobile, onClose }) {
   return (
     <NavLink
       to={to}
-      end={to === '/'}
+      end={to === '/' || to === '/pipeline'}
       onClick={mobile ? onClose : undefined}
       style={({ isActive }) => ({
         display: 'flex',
@@ -86,14 +86,13 @@ export default function Sidebar({ mobile, onClose }) {
   }, [])
 
   const mainNav = [
-    { to: '/home',      icon: Home,         label: 'Home'           },
-    { to: '/',          icon: Columns3,     label: 'Pipeline',      badge: pipelineCount },
+    { to: '/',          icon: Home,         label: 'Home'           },
+    { to: '/pipeline',  icon: Columns3,     label: 'Pipeline',      badge: pipelineCount },
     { to: '/projects',  icon: FolderOpen,   label: 'Projects'       },
     { to: '/calendar',  icon: CalendarDays, label: 'Calendar',      badge: calendarCount },
     { to: '/bdr',       icon: Handshake,    label: 'BDR'            },
     { to: '/contacts',  icon: BookUser,     label: 'Contacts'       },
-    { to: '/employees', icon: Users,         label: 'Employees'      },
-    { to: '/schedule',  icon: ClipboardList, label: 'Crew Schedule'  },
+{ to: '/schedule',  icon: ClipboardList, label: 'Crew Schedule'  },
     { to: '/training',  icon: BookOpen,     label: 'Training'       },
     { to: '/library',   icon: Image,        label: 'Library'        },
     { to: '/expenses',  icon: ReceiptText,  label: 'Expenses'       },

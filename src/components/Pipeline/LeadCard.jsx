@@ -1,143 +1,251 @@
-import { useState, memo, useMemo } from 'react'
-import { Phone } from 'lucide-react'
+import { memo, useMemo, useState } from 'react'
+import { MapPin, Clock } from 'lucide-react'
 import { useTeam } from '../../lib/TeamContext'
 
-const JOB_DOT = {
-  'Clean Out': '#C28A5A',
-  'Auction':   '#8666BD',
-  'Both':      '#5A7FB3',
-}
-const JOB_LABEL = {
-  'Clean Out': 'Clean Out',
-  'Auction':   'Auction',
-  'Both':      'Both',
+// ── Job type badge config ──────────────────────────────────────────────────
+
+const JOB_TYPE_COLORS = {
+  'Clean Out':          { text: '#4B80C1', bg: 'color-mix(in oklab, #4B80C1 14%, var(--panel))' },
+  'Auction':            { text: '#7A5CA5', bg: 'color-mix(in oklab, #7A5CA5 14%, var(--panel))' },
+  'Both':               { text: '#3E5C86', bg: 'color-mix(in oklab, #3E5C86 14%, var(--panel))' },
+  'Move':               { text: '#3A9E8A', bg: 'color-mix(in oklab, #3A9E8A 14%, var(--panel))' },
 }
 
-// Deterministic hue from any string → same member always gets same OKLCH color.
-// Lightness 0.72 and chroma 0.08 are fixed so all avatars feel harmonious.
-function strToHue(str = '') {
-  let h = 0
-  for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) % 360
-  return h
+const FALLBACK_JOB_COLOR = { text: '#6B7280', bg: 'color-mix(in oklab, #6B7280 12%, var(--panel))' }
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+function daysAgo(dateStr) {
+  if (!dateStr) return null
+  const ms = Date.now() - new Date(dateStr).getTime()
+  return Math.max(0, Math.floor(ms / 86400000))
 }
 
-const LeadCard = memo(function LeadCard({ lead, onClick, stageTint, stageSoft, isDragging, onDragStart, onDragEnd }) {
+function formatBid(value) {
+  if (value == null) return null
+  if (value >= 1000) return `$${(value / 1000).toFixed(1).replace(/\.0$/, '')}k`
+  return `$${Math.round(value).toLocaleString()}`
+}
+
+function scoreColor(score) {
+  const n = Number(score)
+  if (n >= 7.5) return 'var(--win)'
+  if (n >= 4.5) return 'var(--warn)'
+  return 'var(--lose)'
+}
+
+// ── Pill ──────────────────────────────────────────────────────────────────
+
+function Pill({ text, textColor, bgColor }) {
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center',
+      padding: '2px 7px',
+      borderRadius: 999,
+      fontSize: 10.5, fontWeight: 600,
+      color: textColor,
+      background: bgColor,
+      border: `1px solid color-mix(in oklab, ${textColor} 22%, transparent)`,
+      whiteSpace: 'nowrap',
+      lineHeight: 1.5,
+    }}>
+      {text}
+    </span>
+  )
+}
+
+// ── Main component ─────────────────────────────────────────────────────────
+
+const LeadCard = memo(function LeadCard({
+  lead, onClick, stageTint, stageSoft, isDragging, onPointerDown,
+}) {
   const [hover, setHover] = useState(false)
   const { members } = useTeam()
-  const assignee = lead.assigned_to ? members.find(m => m.id === lead.assigned_to) : null
 
-  const jobDot = JOB_DOT[lead.job_type] || '#9CA3AF'
+  const member = useMemo(() => {
+    if (!lead.assigned_to) return null
+    return members.find(m => String(m.id) === String(lead.assigned_to)) || null
+  }, [members, lead.assigned_to])
 
-  const score    = lead.deal_score != null ? Math.round(lead.deal_score) : null
-  const scoreHot = score != null && score >= 8
-  const scoreColor = score == null ? null
-    : score >= 8 ? 'var(--win)'
-    : score >= 5 ? 'var(--ink-2)'
+  const initials = useMemo(() => {
+    if (member?.initials) return member.initials
+    if (lead.assigned_to) return String(lead.assigned_to).slice(0, 2).toUpperCase()
+    return null
+  }, [member, lead.assigned_to])
+
+  const days = useMemo(
+    () => daysAgo(lead.last_status_change || lead.updated_at || lead.created_at),
+    [lead.last_status_change, lead.updated_at, lead.created_at],
+  )
+
+  const daysLabel = days === null ? null : days === 0 ? 'Today' : `${days}d`
+  const daysColor = days === null ? 'var(--ink-4)'
+    : days < 7 ? 'var(--ink-4)'
+    : days < 14 ? 'var(--warn)'
     : 'var(--lose)'
 
-  const bid = lead._scoreDetails?.recommendedBid
-  const bidLabel = bid != null
-    ? `$${bid >= 10000
-        ? `${Math.round(bid / 1000)}k`
-        : bid >= 1000
-          ? `${(bid / 1000).toFixed(1)}k`
-          : bid}`
-    : null
+  const bid = lead._scoreDetails?.recommendedBid ?? lead.bid_amount ?? null
+  const score = lead.deal_score ?? lead.item_quality_score ?? null
+  const showScoreRow = score != null || bid != null
 
-  const cardBg     = useMemo(
-    () => stageSoft ? `color-mix(in oklab, ${stageSoft} 18%, var(--panel))` : 'var(--panel)',
-    [stageSoft]
-  )
-  const borderColor = hover ? (stageTint || '#C8CFD8') : 'var(--line)'
+  const jobColors = JOB_TYPE_COLORS[lead.job_type] || (lead.job_type ? FALLBACK_JOB_COLOR : null)
 
-  // OKLCH avatar — lightness + chroma fixed, hue derived from member id
-  const avatarInitials = assignee
-    ? (assignee.initials || assignee.name?.[0] || '?').toUpperCase()
-    : 'MR'
-  const avatarHue = strToHue(assignee?.id ?? 'mr-default-12')
-  const avatarBg  = `oklch(0.72 0.08 ${avatarHue})`
+  // Status badge
+  const wonLostBacklog = ['Won', 'Lost', 'Backlog']
+  let statusBadge = null
+  if (score != null && !wonLostBacklog.includes(lead.status)) {
+    statusBadge = (
+      <Pill
+        text="Scored"
+        textColor="var(--win)"
+        bgColor="color-mix(in oklab, var(--win) 14%, var(--panel))"
+      />
+    )
+  } else if (lead.status === 'Estimate Sent') {
+    statusBadge = (
+      <Pill
+        text="Estimate Sent"
+        textColor="#4A6FA5"
+        bgColor="color-mix(in oklab, #4A6FA5 14%, var(--panel))"
+      />
+    )
+  } else if (score == null && lead.status === 'New Lead') {
+    statusBadge = (
+      <Pill
+        text="Imported"
+        textColor="var(--ink-3)"
+        bgColor="color-mix(in oklab, var(--ink-3) 10%, var(--panel))"
+      />
+    )
+  }
+
+  if (isDragging) {
+    return (
+      <div style={{
+        height: 120,
+        borderRadius: 12,
+        border: `1.5px dashed ${stageTint || 'var(--line)'}`,
+        background: `color-mix(in oklab, ${stageTint || 'transparent'} 6%, var(--bg-2))`,
+        flexShrink: 0,
+      }} />
+    )
+  }
 
   return (
     <article
-      draggable
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
+      onPointerDown={onPointerDown}
       onClick={onClick}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
-        background: cardBg,
-        border: `1px solid ${borderColor}`,
+        background: 'var(--panel)',
+        border: `1px solid ${hover ? (stageTint || 'var(--line)') : 'var(--line)'}`,
         borderRadius: 12,
-        padding: '10px 12px',
+        padding: '10px 11px',
         cursor: 'grab',
-        opacity: isDragging ? 0.4 : 1,
-        transform: hover && !isDragging ? 'translateY(-1px)' : 'none',
-        boxShadow: hover && !isDragging ? 'var(--shadow-2)' : 'var(--shadow-1)',
-        transition: 'transform 140ms cubic-bezier(.2,.7,.3,1.1), box-shadow 140ms, border-color 120ms, background 120ms',
-        display: 'flex', flexDirection: 'column', gap: 4,
+        transform: hover ? 'translateY(-1px)' : 'none',
+        boxShadow: hover ? 'var(--shadow-2)' : 'var(--shadow-1)',
+        transition: 'transform 140ms cubic-bezier(.2,.7,.3,1.1), box-shadow 140ms, border-color 120ms',
+        display: 'flex', flexDirection: 'column',
+        gap: 5,
         userSelect: 'none',
+        touchAction: 'none',
+        flexShrink: 0,
       }}
     >
-      {/* Row 1: job-dot · name · score */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span title={JOB_LABEL[lead.job_type]} style={{
-          width: 6, height: 6, borderRadius: '50%',
-          background: jobDot, flexShrink: 0,
-        }} />
-        <span style={{
-          fontSize: 13.5, fontWeight: 600, color: 'var(--ink-1)',
-          letterSpacing: '-0.01em', lineHeight: 1.2,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          flex: 1, minWidth: 0,
-        }}>{lead.name}</span>
-        {score != null && (
-          <span className="tnum" style={{
-            fontSize: 11, fontWeight: 700, color: scoreColor, flexShrink: 0,
-          }}>{score}{scoreHot ? '★' : ''}</span>
-        )}
+      {/* Row 1: Badges */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4, minHeight: 20 }}>
+        <div>
+          {jobColors && lead.job_type && (
+            <Pill text={lead.job_type} textColor={jobColors.text} bgColor={jobColors.bg} />
+          )}
+        </div>
+        <div>{statusBadge}</div>
       </div>
 
-      {/* Row 2: address */}
-      {lead.address && (
-        <div style={{
-          fontSize: 11.5, color: 'var(--ink-3)',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          paddingLeft: 14,
-        }}>{lead.address}</div>
-      )}
-
-      {/* Row 3: value · job label · OKLCH owner avatar */}
+      {/* Row 2: Name */}
       <div style={{
-        display: 'flex', alignItems: 'center', gap: 6,
-        paddingLeft: 14, marginTop: 2,
-        fontSize: 11, color: 'var(--ink-3)',
+        fontSize: 15, fontWeight: 700,
+        color: 'var(--ink-1)',
+        letterSpacing: '-0.02em',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
       }}>
-        {bidLabel && (
-          <span className="tnum" style={{ fontWeight: 600, color: 'var(--ink-2)' }}>{bidLabel}</span>
-        )}
-        {bidLabel && lead.job_type && <span style={{ color: 'var(--ink-4)' }}>·</span>}
-        {lead.job_type && <span style={{ color: 'var(--ink-4)' }}>{JOB_LABEL[lead.job_type]}</span>}
-        <div style={{ flex: 1 }} />
-        <div title={assignee?.name ?? 'Margaret Reyes'} style={{
-          width: 18, height: 18, borderRadius: '50%',
-          background: avatarBg,
-          color: 'white', fontSize: 8.5, fontWeight: 700,
-          display: 'grid', placeItems: 'center', flexShrink: 0,
-        }}>{avatarInitials}</div>
+        {lead.name}
       </div>
 
-      {/* Row 4 (hover-only): phone */}
-      {hover && lead.phone && (
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 5,
-          paddingLeft: 14, marginTop: 2,
-          fontSize: 11, color: 'var(--ink-3)',
-        }}>
-          <Phone size={10} strokeWidth={1.8} />
-          <span className="tnum">{lead.phone}</span>
+      {/* Row 3: Address */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 4,
+        fontSize: 11.5,
+        color: lead.address ? 'var(--ink-3)' : 'var(--ink-4)',
+        fontStyle: lead.address ? 'normal' : 'italic',
+        overflow: 'hidden',
+        whiteSpace: 'nowrap',
+        textOverflow: 'ellipsis',
+      }}>
+        <MapPin size={11} strokeWidth={1.8} style={{ flexShrink: 0, color: 'var(--ink-4)' }} />
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {lead.address || 'No address added'}
+        </span>
+      </div>
+
+      {/* Row 4: Score + Bid */}
+      {showScoreRow && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          {score != null && (
+            <Pill
+              text={`${Number(score).toFixed(1)}/10`}
+              textColor={scoreColor(score)}
+              bgColor={`color-mix(in oklab, ${scoreColor(score)} 12%, var(--panel))`}
+            />
+          )}
+          {bid != null && (
+            <span className="tnum" style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink-1)' }}>
+              {formatBid(bid)}
+            </span>
+          )}
         </div>
       )}
+
+      {/* Row 5: Avatar + Days */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 2 }}>
+        {initials ? (
+          <div style={{
+            width: 24, height: 24, borderRadius: '50%',
+            background: member?.color || stageTint || 'var(--ink-4)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 9.5, fontWeight: 700,
+            color: '#fff',
+            flexShrink: 0,
+            letterSpacing: '0.01em',
+          }}>
+            {initials}
+          </div>
+        ) : (
+          <div style={{
+            width: 24, height: 24, borderRadius: '50%',
+            border: '1.5px dashed var(--line-2)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 11, color: 'var(--ink-4)',
+            flexShrink: 0,
+          }}>
+            ?
+          </div>
+        )}
+
+        {daysLabel != null && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 3,
+            fontSize: 11, color: daysColor,
+            fontVariantNumeric: 'tabular-nums',
+          }}>
+            <Clock size={10} strokeWidth={2} style={{ flexShrink: 0 }} />
+            {daysLabel}
+          </div>
+        )}
+      </div>
     </article>
   )
 })

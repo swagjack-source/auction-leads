@@ -65,7 +65,9 @@ exports.handler = async function () {
     statusCode: 200,
     headers: {
       'Content-Type': 'text/calendar; charset=utf-8',
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      // Allow calendar apps to cache for 1 hour — reduces unnecessary DB hits.
+      // Google Calendar polls every few hours; Apple Calendar every 15–60 min.
+      'Cache-Control': 'public, max-age=3600, stale-while-revalidate=600',
       'Access-Control-Allow-Origin': '*',
     },
     body: cal,

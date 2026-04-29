@@ -1,9 +1,14 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
-import { Search, X, Users, Trophy, Star, TrendingUp, ArrowUpDown, ChevronDown, Upload } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { Search, X, Bell, CalendarDays, Send, TrendingUp, ArrowUpDown, ChevronDown, Upload, MapPin, ExternalLink } from 'lucide-react'
 import * as XLSX from 'xlsx'
-import StageColumn from '../components/Pipeline/StageColumn'
+import StageColumn, { STAGE_META } from '../components/Pipeline/StageColumn'
+import LeadCard from '../components/Pipeline/LeadCard'
 import LeadModal from '../components/Pipeline/LeadModal'
 import LeadDrawer from '../components/Pipeline/LeadDrawer'
+import StageTransitionModal, { needsTransitionPrompt } from '../components/Pipeline/StageTransitionModal'
+import NewLeadModal from '../components/Pipeline/NewLeadModal'
+import ErrorBoundary from '../components/ErrorBoundary'
 import { ACTIVE_STAGES, OUTCOME_STAGES } from '../lib/constants'
 import { supabase } from '../lib/supabase'
 import PipelineListView from '../components/Pipeline/PipelineListView'
@@ -210,122 +215,131 @@ const EMPTY_LEAD = {
   lead_source: null,
 }
 
-function StatContribModal({ label, leads, tint, tintFg, icon: Icon, onClose }) {
+// ── Action stat cards ─────────────────────────────────────────
+
+const QUICK_FILTER_LABELS = {
+  stale:             'Stale leads (3+ days)',
+  estimates_pending: 'Estimates pending',
+  won_this_month:    'Won this month',
+}
+
+function ActionStatCard({ icon: Icon, iconColor, iconBg, label, value, subtext, subtextColor, cardBg, onClick }) {
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        background: cardBg || 'var(--panel)',
+        border: '1px solid var(--line)',
+        borderRadius: 14, padding: '14px 16px',
+        display: 'flex', flexDirection: 'column', gap: 10,
+        boxShadow: 'var(--shadow-1)',
+        cursor: 'pointer',
+        transition: 'box-shadow 120ms, border-color 120ms, background 200ms',
+      }}
+      onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 18px rgba(20,22,26,0.13)'; e.currentTarget.style.borderColor = 'var(--ink-4)' }}
+      onMouseLeave={e => { e.currentTarget.style.boxShadow = 'var(--shadow-1)'; e.currentTarget.style.borderColor = 'var(--line)' }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ width: 28, height: 28, borderRadius: 8, background: iconBg, display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+          <Icon size={15} strokeWidth={1.8} color={iconColor} />
+        </div>
+        <span style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 500 }}>{label}</span>
+      </div>
+      <div>
+        <div className="tnum" style={{ fontSize: 26, fontWeight: 700, letterSpacing: '-0.02em', lineHeight: 1, color: 'var(--ink-1)' }}>{value}</div>
+        {subtext && (
+          <div style={{ fontSize: 11, color: subtextColor || 'var(--ink-4)', marginTop: 5, fontWeight: subtextColor ? 600 : 400 }}>
+            {subtext}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function ConsultsModal({ consults, onClose, onOpenLead }) {
   return (
     <>
       <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(20,22,26,0.25)', zIndex: 60, animation: 'fadein 160ms ease' }} />
       <div style={{
         position: 'fixed', top: '8vh', left: '50%', transform: 'translateX(-50%)',
-        width: 'min(720px, 94vw)', maxHeight: '80vh',
+        width: 'min(520px, 94vw)', maxHeight: '80vh',
         background: 'var(--panel)', borderRadius: 14, zIndex: 61,
         display: 'flex', flexDirection: 'column',
         boxShadow: '0 20px 60px rgba(20,22,26,0.25)',
         overflow: 'hidden',
-        animation: 'slidein 220ms cubic-bezier(.2,.7,.3,1.05)',
+        animation: 'popin 220ms cubic-bezier(.2,.7,.3,1.05)',
       }}>
         <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ width: 32, height: 32, borderRadius: 9, background: tint, color: tintFg, display: 'grid', placeItems: 'center' }}>
-            <Icon size={16} strokeWidth={1.8} />
+          <div style={{ width: 32, height: 32, borderRadius: 9, background: 'color-mix(in oklab, #3E5C86 20%, var(--panel))', display: 'grid', placeItems: 'center' }}>
+            <CalendarDays size={16} strokeWidth={1.8} color="#7BAAD4" />
           </div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, letterSpacing: '-0.01em' }}>{label}</div>
-            <div style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>{leads.length} contributing {leads.length === 1 ? 'deal' : 'deals'}</div>
+            <div style={{ fontSize: 14, fontWeight: 600, letterSpacing: '-0.01em' }}>Consults This Week</div>
+            <div style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>{consults.length} scheduled</div>
           </div>
-          <button onClick={onClose} style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid var(--line)', background: 'var(--panel)', cursor: 'pointer', display: 'grid', placeItems: 'center', fontSize: 16, color: 'var(--ink-3)' }}>×</button>
+          <button onClick={onClose} style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid var(--line)', background: 'var(--panel)', cursor: 'pointer', display: 'grid', placeItems: 'center', color: 'var(--ink-3)', fontSize: 18, fontFamily: 'inherit' }}>×</button>
         </div>
-        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '4px 4px' }}>
-          {leads.map((l, i) => (
-            <div key={l.id} style={{ display: 'grid', gridTemplateColumns: '1fr 90px 80px 60px', gap: 10, padding: '10px 16px', borderBottom: i < leads.length - 1 ? '1px solid var(--line-2)' : 'none', alignItems: 'center', fontSize: 12.5 }}>
-              <div>
-                <div style={{ fontWeight: 600 }}>{l.name}</div>
-                <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>{l.address}</div>
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          {consults.length === 0 ? (
+            <div style={{ padding: '36px', textAlign: 'center', color: 'var(--ink-4)', fontSize: 13 }}>No consults scheduled this week</div>
+          ) : consults.map((l, i) => {
+            const dt = new Date(l.consult_at)
+            const DAY = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dt.getDay()]
+            const timeStr = dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+            const mapsUrl = l.address
+              ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(l.address + (l.zip_code ? ' ' + l.zip_code : ''))}`
+              : null
+            return (
+              <div key={l.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '14px 20px', borderBottom: i < consults.length - 1 ? '1px solid var(--line-2)' : 'none' }}>
+                <div style={{ width: 46, flexShrink: 0, textAlign: 'center', background: 'var(--bg)', borderRadius: 8, padding: '5px 0', border: '1px solid var(--line)' }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{DAY}</div>
+                  <div className="tnum" style={{ fontSize: 19, fontWeight: 700, color: 'var(--ink-1)', lineHeight: 1.2 }}>{dt.getDate()}</div>
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink-1)' }}>{l.name}</div>
+                  <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>{timeStr}</div>
+                  {l.address && (
+                    <a href={mapsUrl} target="_blank" rel="noopener noreferrer"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 5, fontSize: 12, color: 'var(--ink-3)', textDecoration: 'none' }}
+                      onMouseEnter={e => e.currentTarget.style.color = 'var(--accent)'}
+                      onMouseLeave={e => e.currentTarget.style.color = 'var(--ink-3)'}
+                    >
+                      <MapPin size={11} strokeWidth={1.8} />
+                      {l.address}{l.zip_code ? `, ${l.zip_code}` : ''}
+                    </a>
+                  )}
+                </div>
+                <button
+                  onClick={() => { onOpenLead(l); onClose() }}
+                  style={{ flexShrink: 0, padding: '6px 12px', borderRadius: 8, border: '1px solid var(--accent)', background: 'var(--accent-soft)', color: 'var(--accent-ink)', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                >
+                  Open <ExternalLink size={11} strokeWidth={2} />
+                </button>
               </div>
-              <span style={{ fontSize: 11, color: 'var(--ink-2)' }}>{l.job_type}</span>
-              <span className="tnum" style={{ fontWeight: 600 }}>{l._scoreDetails?.recommendedBid ? `$${(l._scoreDetails.recommendedBid / 1000).toFixed(1)}k` : '—'}</span>
-              <span className="tnum" style={{ fontSize: 11, fontWeight: 600, color: (l.deal_score || 0) >= 8 ? 'var(--win)' : (l.deal_score || 0) >= 5 ? 'var(--ink-2)' : 'var(--lose)' }}>{l.deal_score ? `${Math.round(l.deal_score)}/10` : '—'}</span>
-            </div>
-          ))}
-          {leads.length === 0 && (
-            <div style={{ padding: '24px', textAlign: 'center', color: 'var(--ink-4)', fontSize: 12.5 }}>No deals to display</div>
-          )}
+            )
+          })}
         </div>
       </div>
     </>
   )
 }
 
-function StatCard({ label, value, sub, delta, deltaDir, icon: Icon, tint, tintFg, contribLeads }) {
-  const [modalOpen, setModalOpen] = useState(false)
-  const spark = useMemo(() => Array.from({ length: 18 }, (_, i) =>
-    30 + Math.sin(i * 0.7) * 8 + Math.random() * 5 + i * 0.8
-  ), [])
-  const max = Math.max(...spark), min = Math.min(...spark)
-  const w = 72, h = 22
-  const pts = spark.map((v, i) => {
-    const x = (i / (spark.length - 1)) * w
-    const y = h - ((v - min) / (max - min)) * h
-    return `${x},${y}`
-  }).join(' ')
-
-  const cardBg = tint ? `color-mix(in oklab, ${tint} 25%, var(--panel))` : 'var(--panel)'
-  const iconBg = tint || 'var(--accent-soft)'
-  const iconFg = tintFg || 'var(--accent-ink)'
-
+function ConsultsCard({ consults, nextConsultDay, onOpenLead }) {
+  const [open, setOpen] = useState(false)
+  const sub = consults.length === 0
+    ? 'none scheduled'
+    : nextConsultDay ? `next: ${nextConsultDay}` : 'this week'
   return (
     <>
-      <div
-        onClick={() => contribLeads && setModalOpen(true)}
-        onMouseOver={e => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = 'var(--shadow-2)' }}
-        onMouseOut={e => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = 'var(--shadow-1)' }}
-        style={{
-          background: cardBg,
-          border: '1px solid var(--line)',
-          borderRadius: 14,
-          padding: '14px 16px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 8,
-          boxShadow: 'var(--shadow-1)',
-          cursor: contribLeads ? 'pointer' : 'default',
-          transition: 'transform 120ms, box-shadow 120ms',
-        }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{ width: 26, height: 26, borderRadius: 8, background: iconBg, color: iconFg, display: 'grid', placeItems: 'center' }}>
-            <Icon size={14} strokeWidth={1.8} />
-          </div>
-          <div style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 500 }}>{label}</div>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 8 }}>
-          <div>
-            <div className="tnum" style={{ fontSize: 26, fontWeight: 600, letterSpacing: '-0.02em', lineHeight: 1, color: 'var(--ink-1)' }}>{value}</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
-              {delta && (
-                <span style={{
-                  fontSize: 11, fontWeight: 600,
-                  color: deltaDir === 'up' ? 'var(--win)' : 'var(--lose)',
-                  background: deltaDir === 'up' ? 'var(--win-soft)' : 'var(--lose-soft)',
-                  padding: '1px 6px', borderRadius: 5,
-                }}>{deltaDir === 'up' ? '↑' : '↓'} {delta}</span>
-              )}
-              {sub && <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>{sub}</span>}
-            </div>
-          </div>
-          <svg width={w} height={h} style={{ flexShrink: 0 }}>
-            <polyline fill="none" stroke="var(--accent)" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" points={pts} />
-            <polyline fill="var(--accent)" fillOpacity="0.08" stroke="none" points={`0,${h} ${pts} ${w},${h}`} />
-          </svg>
-        </div>
-      </div>
-      {modalOpen && contribLeads && (
-        <StatContribModal
-          label={label}
-          leads={contribLeads}
-          tint={iconBg}
-          tintFg={iconFg}
-          icon={Icon}
-          onClose={() => setModalOpen(false)}
-        />
-      )}
+      <ActionStatCard
+        icon={CalendarDays} iconColor="#7BAAD4" iconBg="color-mix(in oklab, #3E5C86 20%, var(--panel))"
+        label="Consults This Week"
+        value={consults.length}
+        subtext={sub}
+        onClick={() => setOpen(true)}
+      />
+      {open && <ConsultsModal consults={consults} onClose={() => setOpen(false)} onOpenLead={onOpenLead} />}
     </>
   )
 }
@@ -346,12 +360,14 @@ function enrichLead(lead) {
 
 export default function Pipeline() {
   const { organizationId } = useAuth()
-  const [leads, setLeads] = useState(() => MOCK_LEADS.map(enrichLead))
+  const [leads, setLeads] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [drawerLead, setDrawerLead] = useState(null)
   const [selectedLead, setSelectedLead] = useState(null)
   const [isNewLead, setIsNewLead] = useState(false)
+  const [newLeadStage, setNewLeadStage] = useState('New Lead')
+  const [pendingTransition, setPendingTransition] = useState(null) // { lead, toStage }
 
   const [view, setView] = useState('board')
   const [search, setSearch] = useState('')
@@ -359,23 +375,21 @@ export default function Pipeline() {
   const [outcomeFilter, setOutcomeFilter] = useState(null)
   const [selectedMember, setSelectedMember] = useState(null)
   const [sortBy, setSortBy] = useState('date_desc')
-  const [draggingId, setDraggingId] = useState(null)
+  // drag state — only used for overlay render + placeholder detection
+  const [drag, setDrag] = useState(null)      // { id, lead, w, h }
   const [hoverCol, setHoverCol] = useState(null)
-  const hoverColRef = useRef(null)
+  const [estimates, setEstimates] = useState([])
+  const [quickFilter, setQuickFilter] = useState(null)
+
+  // Refs — mutated directly in pointer handlers to avoid render overhead
+  const hoverColRef   = useRef(null)          // current hovered stage name
+  const pendingRef    = useRef(null)          // { lead, startX, startY, offsetX, offsetY, w, h }
+  const isDraggingRef = useRef(false)         // true once threshold crossed
+  const overlayRef    = useRef(null)          // the floating overlay DOM node
+
   const boardRef = useRef(null)
   const importFileRef = useRef(null)
 
-  useEffect(() => {
-    const el = boardRef.current
-    if (!el) return
-    function onWheel(e) {
-      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return
-      e.preventDefault()
-      el.scrollLeft += e.deltaY
-    }
-    el.addEventListener('wheel', onWheel, { passive: false })
-    return () => el.removeEventListener('wheel', onWheel)
-  }, [])
 
   useEffect(() => { fetchLeads() }, [])
 
@@ -389,32 +403,48 @@ export default function Pipeline() {
     setLoading(true)
     setError(null)
     try {
-      const { data, error } = await supabase
-        .from('leads')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .range(0, 499)
-      if (error) logger.error('fetchLeads error', error)
-      const leads = data && data.length > 0 ? data : MOCK_LEADS
-      setLeads(leads.map(enrichLead))
+      const [leadsRes, estRes] = await Promise.all([
+        supabase.from('leads').select('*').order('created_at', { ascending: false }).range(0, 499),
+        supabase.from('estimates').select('lead_id, status'),
+      ])
+      if (leadsRes.error) {
+        logger.error('fetchLeads error', leadsRes.error)
+        setError('Failed to load leads. Please try again.')
+      } else {
+        setLeads((leadsRes.data || []).map(enrichLead))
+      }
+      setEstimates(estRes.data || [])
     } catch (e) {
       logger.error('fetchLeads threw', e)
-      setLeads(MOCK_LEADS.map(enrichLead))
+      setError('Failed to load leads. Please try again.')
     }
     setLoading(false)
   }
 
-  async function handleMoveStatus(lead, newStatus) {
+  const handleMoveStatus = useCallback(async (lead, newStatus, extraFields = {}) => {
+    // Optimistic update — capture previous lead for revert
+    let prevLead = null
+    setLeads(ls => {
+      prevLead = ls.find(l => l.id === lead.id) || null
+      return ls.map(l => l.id === lead.id ? { ...l, status: newStatus, ...extraFields } : l)
+    })
+    setDrawerLead(prev => prev?.id === lead.id ? { ...prev, status: newStatus, ...extraFields } : prev)
+
     const { error } = await supabase
       .from('leads')
-      .update({ status: newStatus })
+      .update({ status: newStatus, ...extraFields })
       .eq('id', lead.id)
-    if (error) { logger.error('Move lead status failed', error); return }
-    setLeads(ls => ls.map(l => l.id === lead.id ? { ...l, status: newStatus } : l))
-    setDrawerLead(prev => prev?.id === lead.id ? { ...prev, status: newStatus } : prev)
-  }
+    if (error) {
+      logger.error('Move lead status failed', error)
+      // Revert on error
+      if (prevLead) {
+        setLeads(ls => ls.map(l => l.id === lead.id ? prevLead : l))
+        setDrawerLead(prev => prev?.id === lead.id ? prevLead : prev)
+      }
+    }
+  }, []) // setLeads/setDrawerLead are stable; supabase is module-level
 
-  async function handleSave(updated) {
+  const handleSave = useCallback(async (updated) => {
     const { _scoreDetails, ...raw } = updated
     const toSave = {
       ...raw,
@@ -430,7 +460,11 @@ export default function Pipeline() {
         .select()
         .single()
       if (error) throw new Error(error.message)
-      setLeads(ls => [enrichLead(data), ...ls])
+      const enriched = enrichLead(data)
+      setLeads(ls => [enriched, ...ls])
+      setSelectedLead(null)
+      setIsNewLead(false)
+      return enriched
     } else {
       const { error } = await supabase
         .from('leads')
@@ -443,7 +477,7 @@ export default function Pipeline() {
     }
     setSelectedLead(null)
     setIsNewLead(false)
-  }
+  }, [organizationId])
 
   async function handleImportLeads(e) {
     const file = e.target.files?.[0]; if (!file) return; e.target.value = ''
@@ -513,12 +547,21 @@ export default function Pipeline() {
     }
   }
 
-  function openNewLead() {
+  const openNewLead = useCallback(() => {
+    setNewLeadStage('New Lead')
     setIsNewLead(true)
-    setSelectedLead({ ...EMPTY_LEAD })
-  }
+  }, [])
+
+  const openNewLeadForStage = useCallback((stage) => {
+    setNewLeadStage(stage)
+    setIsNewLead(true)
+  }, [])
 
   const filtered = useMemo(() => {
+    const now = new Date()
+    const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000
+    const thisMonth = now.getMonth(), thisYear = now.getFullYear()
+
     let out = leads.filter(l => {
       if (search && !l.name.toLowerCase().includes(search.toLowerCase()) &&
           !l.address?.toLowerCase().includes(search.toLowerCase()) &&
@@ -526,6 +569,18 @@ export default function Pipeline() {
       if (jobFilter !== 'All' && l.job_type !== jobFilter) return false
       if (outcomeFilter && l.status !== outcomeFilter) return false
       if (selectedMember && l.assigned_to !== selectedMember) return false
+      if (quickFilter === 'stale') {
+        if (['Won', 'Lost', 'Backlog'].includes(l.status)) return false
+        if (!l.updated_at || (now - new Date(l.updated_at)) <= THREE_DAYS_MS) return false
+      }
+      if (quickFilter === 'estimates_pending') {
+        if (l.status !== 'Consult Completed') return false
+      }
+      if (quickFilter === 'won_this_month') {
+        if (l.status !== 'Won') return false
+        const d = new Date(l.updated_at)
+        if (d.getMonth() !== thisMonth || d.getFullYear() !== thisYear) return false
+      }
       return true
     })
     if (sortBy === 'date_asc')  out = [...out].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
@@ -533,7 +588,7 @@ export default function Pipeline() {
     if (sortBy === 'value')     out = [...out].sort((a, b) => (b._scoreDetails?.recommendedBid || 0) - (a._scoreDetails?.recommendedBid || 0))
     if (sortBy === 'name')      out = [...out].sort((a, b) => a.name.localeCompare(b.name))
     return out
-  }, [leads, search, jobFilter, outcomeFilter, selectedMember, sortBy])
+  }, [leads, search, jobFilter, outcomeFilter, selectedMember, sortBy, quickFilter])
 
   const grouped = useMemo(() => {
     const map = {}
@@ -544,75 +599,244 @@ export default function Pipeline() {
     return stage => map[stage] || []
   }, [filtered])
 
-  const handleDragOver = useCallback((stage, e) => {
-    e.preventDefault()
-    e.dataTransfer.dropEffect = 'move'
-    if (hoverColRef.current !== stage) {
-      hoverColRef.current = stage
-      setHoverCol(stage)
+  // ── Pointer-events drag system ─────────────────────────────
+  // Called from LeadCard onPointerDown via StageColumn → Pipeline
+  const handleDragStart = useCallback((lead, e) => {
+    if (e.button !== undefined && e.button !== 0) return  // left button only
+    const rect = e.currentTarget.getBoundingClientRect()
+    pendingRef.current = {
+      lead,
+      startX:  e.clientX,
+      startY:  e.clientY,
+      offsetX: e.clientX - rect.left,
+      offsetY: e.clientY - rect.top,
+      w: rect.width,
+      h: rect.height,
     }
+    isDraggingRef.current = false
   }, [])
 
-  const handleDragLeave = useCallback((stage) => {
-    if (hoverColRef.current === stage) {
-      hoverColRef.current = null
-      setHoverCol(null)
-    }
-  }, [])
+  // One effect, runs on mount — all drag logic lives here via refs
+  useEffect(() => {
+    function onMove(e) {
+      const p = pendingRef.current
+      if (!p) return
 
-  const handleDrop = useCallback((stage, e) => {
-    e.preventDefault()
-    const id = e.dataTransfer.getData('text/plain')
-    if (id) {
-      setLeads(ls => {
-        const lead = ls.find(l => l.id === id)
-        if (lead && lead.status !== stage) handleMoveStatus(lead, stage)
-        return ls
-      })
+      if (!isDraggingRef.current) {
+        const dist = Math.hypot(e.clientX - p.startX, e.clientY - p.startY)
+        if (dist < 5) return  // haven't crossed threshold yet
+
+        // Threshold crossed → activate drag
+        isDraggingRef.current = true
+        document.body.style.userSelect = 'none'
+        document.body.style.cursor = 'grabbing'
+        setDrag({ id: p.lead.id, lead: p.lead, w: p.w, h: p.h })
+      }
+
+      // Update overlay position directly in DOM — zero React overhead, perfectly smooth
+      if (overlayRef.current) {
+        const x = e.clientX - p.offsetX
+        const y = e.clientY - p.offsetY
+        overlayRef.current.style.transform =
+          `translate3d(${x}px, ${y}px, 0) rotate(1.5deg) scale(1.04)`
+      }
+
+      // Detect which stage column the pointer is over
+      const el = document.elementFromPoint(e.clientX, e.clientY)
+      const stage = el?.closest('[data-stage]')?.dataset.stage ?? null
+      if (stage !== hoverColRef.current) {
+        hoverColRef.current = stage
+        setHoverCol(stage)
+      }
     }
-    setDraggingId(null)
-    hoverColRef.current = null
-    setHoverCol(null)
+
+    function onUp(e) {
+      const p = pendingRef.current
+      const wasDragging = isDraggingRef.current
+
+      // Reset everything
+      isDraggingRef.current = false
+      pendingRef.current = null
+      document.body.style.userSelect = ''
+      document.body.style.cursor = ''
+
+      if (wasDragging) {
+        // Resolve drop
+        const el = document.elementFromPoint(e.clientX, e.clientY)
+        const targetStage = el?.closest('[data-stage]')?.dataset.stage
+        if (targetStage && p && targetStage !== p.lead.status) {
+          if (needsTransitionPrompt(targetStage)) {
+            // Show contextual modal before committing the move
+            setPendingTransition({ lead: p.lead, toStage: targetStage })
+          } else {
+            handleMoveStatus(p.lead, targetStage)
+          }
+        }
+        setDrag(null)
+        hoverColRef.current = null
+        setHoverCol(null)
+      }
+      // If !wasDragging it was a plain click → React's onClick fires naturally
+    }
+
+    document.addEventListener('pointermove', onMove, { passive: true })
+    document.addEventListener('pointerup',   onUp)
+    return () => {
+      document.removeEventListener('pointermove', onMove)
+      document.removeEventListener('pointerup',   onUp)
+    }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  // ↑ safe: handleMoveStatus / setDrag / setHoverCol are all stable references
 
-  const handleDragStart = useCallback((id, e) => {
-    setDraggingId(id)
-    e.dataTransfer.effectAllowed = 'move'
-    try { e.dataTransfer.setData('text/plain', id) } catch {}
-  }, [])
+  const { needsFollowUp, consultsThisWeek, nextConsultDay, estimatesPending, revThisMonth, revLastMonth } = useMemo(() => {
+    const now = new Date()
+    const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000
 
-  const handleDragEnd = useCallback(() => {
-    setDraggingId(null)
-    hoverColRef.current = null
-    setHoverCol(null)
-  }, [])
+    // Card 1: stale active leads (not Won/Lost/Backlog, not touched in 3+ days)
+    const stale = leads.filter(l =>
+      !['Won', 'Lost', 'Backlog'].includes(l.status) &&
+      l.updated_at && (now - new Date(l.updated_at)) > THREE_DAYS_MS
+    )
 
-  const { activeLeads, wonLeads, avgScore, pipelineValue } = useMemo(() => {
-    const active = leads.filter(l => ACTIVE_STAGES.includes(l.status))
-    const won    = leads.filter(l => l.status === 'Won')
-    const scored = leads.filter(l => l.deal_score)
-    const avg    = scored.length
-      ? scored.reduce((a, b) => a + b.deal_score, 0) / scored.length
+    // Card 2: consults within Mon–Sun of current week
+    const mon = new Date(now)
+    mon.setDate(now.getDate() - ((now.getDay() + 6) % 7))
+    mon.setHours(0, 0, 0, 0)
+    const sun = new Date(mon)
+    sun.setDate(mon.getDate() + 7)
+
+    const weekConsults = leads
+      .filter(l => l.status === 'Consult Scheduled' && l.consult_at)
+      .filter(l => { const d = new Date(l.consult_at); return d >= mon && d < sun })
+      .sort((a, b) => new Date(a.consult_at) - new Date(b.consult_at))
+
+    const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+    const nextConsultDay = weekConsults[0]?.consult_at
+      ? DAYS[new Date(weekConsults[0].consult_at).getDay()]
       : null
-    const pipeline = active.reduce((sum, l) => sum + (l._scoreDetails?.recommendedBid || 0), 0)
-    return { activeLeads: active, wonLeads: won, avgScore: avg, pipelineValue: pipeline }
-  }, [leads])
+
+    // Card 3: Consult Completed with no sent/accepted estimate
+    const sentIds = new Set(
+      estimates.filter(e => e.status === 'Sent' || e.status === 'Accepted').map(e => e.lead_id)
+    )
+    const pendingEst = leads.filter(l => l.status === 'Consult Completed' && !sentIds.has(l.id))
+
+    // Card 4: Won revenue this month vs last month
+    const thisMonth = now.getMonth(), thisYear = now.getFullYear()
+    const lastMonthDate = new Date(thisYear, thisMonth - 1, 1)
+
+    const wonThis = leads.filter(l => {
+      if (l.status !== 'Won') return false
+      const d = new Date(l.updated_at)
+      return d.getMonth() === thisMonth && d.getFullYear() === thisYear
+    })
+    const wonLast = leads.filter(l => {
+      if (l.status !== 'Won') return false
+      const d = new Date(l.updated_at)
+      return d.getMonth() === lastMonthDate.getMonth() && d.getFullYear() === lastMonthDate.getFullYear()
+    })
+    const revThis = wonThis.reduce((s, l) => s + (l._scoreDetails?.recommendedBid || 0), 0)
+    const revLast = wonLast.reduce((s, l) => s + (l._scoreDetails?.recommendedBid || 0), 0)
+
+    return {
+      needsFollowUp:   stale,
+      consultsThisWeek: weekConsults,
+      nextConsultDay,
+      estimatesPending: pendingEst,
+      revThisMonth:    revThis,
+      revLastMonth:    revLast,
+    }
+  }, [leads, estimates])
+
+  const handleUpdateLead = useCallback((id, fields) => {
+    setLeads(ls => ls.map(l => l.id === id ? enrichLead({ ...l, ...fields }) : l))
+    setDrawerLead(prev => prev?.id === id ? enrichLead({ ...prev, ...fields }) : prev)
+  }, [])
+
+  // Stable handler refs so LeadDrawer doesn't bust memo if it ever gains React.memo
+  const handleCloseDrawer = useCallback(() => setDrawerLead(null), [])
+  const handleEditDrawer  = useCallback(() => { setSelectedLead(drawerLead) }, [drawerLead])
+  const handleChecklistChange = useCallback((id, checklist) =>
+    setLeads(ls => ls.map(l => l.id === id ? { ...l, checklist } : l))
+  , [])
+  const handleDeleteLead = useCallback(async id => {
+    await supabase.from('leads').delete().eq('id', id)
+    setLeads(ls => ls.filter(l => l.id !== id))
+    setDrawerLead(null)
+  }, [])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
 
       {/* Stats bar */}
-      <div style={{
-        padding: '14px 20px 8px',
-        borderBottom: '1px solid var(--line)',
-        flexShrink: 0,
-        display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12,
-      }}>
-        <StatCard icon={Users}      label="Active Leads"   value={activeLeads.length}                           sub="active in pipeline" delta="+3" deltaDir="up" tint="var(--accent-soft)"  tintFg="var(--accent-ink)" contribLeads={activeLeads} />
-        <StatCard icon={Trophy}     label="Won This Month" value={wonLeads.length}                              sub="closed won"         delta="+1" deltaDir="up" tint="var(--win-soft)"    tintFg="var(--win)"        contribLeads={wonLeads} />
-        <StatCard icon={Star}       label="Avg Deal Score" value={avgScore != null ? avgScore.toFixed(1) : '—'} sub="out of 10"          delta="+0.4" deltaDir="up" tint="var(--warn-soft)" tintFg="var(--warn)"       contribLeads={leads.filter(l => l.deal_score).sort((a,b)=>b.deal_score-a.deal_score).slice(0,10)} />
-        <StatCard icon={TrendingUp} label="Pipeline Value" value={pipelineValue > 0 ? `$${Math.round(pipelineValue/1000)}k` : '—'} sub="weighted" delta="+12%" deltaDir="up" tint="var(--b-both-bg)" tintFg="var(--b-both-fg)" contribLeads={activeLeads.sort((a,b)=>(b._scoreDetails?.recommendedBid||0)-(a._scoreDetails?.recommendedBid||0))} />
-      </div>
+      {(() => {
+        // Card 1 colours — color-mix adapts to dark/light mode automatically
+        const staleCount = needsFollowUp.length
+        const card1Bg = staleCount > 5
+          ? 'color-mix(in oklab, var(--lose) 14%, var(--panel))'
+          : staleCount === 0
+            ? 'color-mix(in oklab, var(--win) 12%, var(--panel))'
+            : 'var(--panel)'
+        const card1Sub = staleCount === 0 ? 'all caught up' : 'untouched 3+ days'
+        const card1SubColor = staleCount === 0 ? 'var(--win)' : staleCount > 5 ? 'var(--lose)' : undefined
+
+        // Card 4 revenue
+        const fmtRev = n => n > 0 ? `$${Math.round(n).toLocaleString()}` : '$0'
+        const revDelta = revThisMonth - revLastMonth
+        const revSub = revThisMonth === 0
+          ? 'no closed deals yet'
+          : revDelta === 0
+            ? 'same as last month'
+            : `${revDelta > 0 ? '+' : ''}$${Math.abs(Math.round(revDelta)).toLocaleString()} vs last month`
+        const revSubColor = revThisMonth === 0 ? undefined
+          : revDelta > 0 ? 'var(--win)' : revDelta < 0 ? 'var(--lose)' : undefined
+
+        return (
+          <div style={{
+            padding: '14px 20px 8px',
+            borderBottom: '1px solid var(--line)',
+            flexShrink: 0,
+            display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12,
+          }}>
+            {/* Card 1: Needs Follow-Up */}
+            <ActionStatCard
+              icon={Bell} iconColor="#F59E0B" iconBg="color-mix(in oklab, #F59E0B 18%, var(--panel))"
+              label="Needs Follow-Up"
+              value={staleCount}
+              subtext={card1Sub}
+              subtextColor={card1SubColor}
+              cardBg={card1Bg}
+              onClick={() => setQuickFilter(q => q === 'stale' ? null : 'stale')}
+            />
+
+            {/* Card 2: Consults This Week */}
+            <ConsultsCard
+              consults={consultsThisWeek}
+              nextConsultDay={nextConsultDay}
+              onOpenLead={setDrawerLead}
+            />
+
+            {/* Card 3: Estimates Pending */}
+            <ActionStatCard
+              icon={Send} iconColor="#F59E0B" iconBg="color-mix(in oklab, #F59E0B 18%, var(--panel))"
+              label="Estimates Pending"
+              value={estimatesPending.length}
+              subtext={estimatesPending.length === 0 ? 'none pending' : 'ready to send'}
+              onClick={() => setQuickFilter(q => q === 'estimates_pending' ? null : 'estimates_pending')}
+            />
+
+            {/* Card 4: Revenue This Month */}
+            <ActionStatCard
+              icon={TrendingUp} iconColor="#2F7A55" iconBg="color-mix(in oklab, #2F7A55 18%, var(--panel))"
+              label="Revenue This Month"
+              value={fmtRev(revThisMonth)}
+              subtext={revSub}
+              subtextColor={revSubColor}
+              onClick={() => setQuickFilter(q => q === 'won_this_month' ? null : 'won_this_month')}
+            />
+          </div>
+        )
+      })()}
 
       {/* Board header */}
       <BoardHeader
@@ -625,9 +849,40 @@ export default function Pipeline() {
         search={search} setSearch={setSearch}
       />
 
+      {/* Quick-filter chip */}
+      {quickFilter && (
+        <div style={{
+          padding: '6px 20px',
+          background: 'var(--accent-soft)',
+          borderBottom: '1px solid var(--accent)30',
+          display: 'flex', alignItems: 'center', gap: 8,
+          flexShrink: 0,
+        }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent-ink)' }}>
+            Filtered: {QUICK_FILTER_LABELS[quickFilter]}
+          </span>
+          <span style={{ fontSize: 12, color: 'var(--accent-ink)', opacity: 0.6 }}>
+            · {filtered.length} {filtered.length === 1 ? 'lead' : 'leads'}
+          </span>
+          <button
+            onClick={() => setQuickFilter(null)}
+            title="Clear filter"
+            style={{
+              marginLeft: 4, display: 'inline-flex', alignItems: 'center', gap: 4,
+              padding: '2px 8px', borderRadius: 999,
+              border: '1px solid var(--accent)50', background: 'var(--accent)15',
+              color: 'var(--accent-ink)', fontSize: 11, fontWeight: 600,
+              cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            <X size={10} strokeWidth={2.5} /> Clear
+          </button>
+        </div>
+      )}
+
       {/* View area */}
       {view === 'list' && (
-        <PipelineListView leads={filtered} onOpen={setDrawerLead} />
+        <PipelineListView leads={filtered} onOpen={setDrawerLead} onUpdate={handleUpdateLead} />
       )}
       {view === 'calendar' && (
         <PipelineCalendarView leads={filtered} onOpen={setDrawerLead} />
@@ -636,7 +891,7 @@ export default function Pipeline() {
         <PipelineMapView leads={filtered} onOpen={setDrawerLead} />
       )}
       {view === 'board' && (
-      <div ref={boardRef} style={{ flex: 1, minHeight: 0, overflowX: 'scroll', overflowY: 'hidden', padding: '6px 20px 20px', scrollbarWidth: 'thin', scrollbarColor: '#6b7280 #11111b' }}>
+      <div ref={boardRef} className="pipeline-board" style={{ flex: 1, minHeight: 0, overflowX: 'auto', overflowY: 'hidden', padding: '6px 20px 20px', scrollbarWidth: 'auto', scrollbarColor: 'var(--scrollbar) var(--bg-2)' }}>
         {loading ? (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text3)', fontSize: 13 }}>
             Loading leads…
@@ -662,14 +917,10 @@ export default function Pipeline() {
                 stage={stage}
                 leads={grouped(stage)}
                 onCardClick={setDrawerLead}
-                onMoveStatus={handleMoveStatus}
-                draggingId={draggingId}
+                draggingId={drag?.id ?? null}
                 isHover={hoverCol === stage}
-                onDragOver={e => handleDragOver(stage, e)}
-                onDragLeave={() => handleDragLeave(stage)}
-                onDrop={e => handleDrop(stage, e)}
-                onDragStart={(e, id) => handleDragStart(id, e)}
-                onDragEnd={handleDragEnd}
+                onDragStart={handleDragStart}
+                onAddLead={openNewLeadForStage}
               />
             ))}
           </div>
@@ -678,29 +929,81 @@ export default function Pipeline() {
       )}
 
       {drawerLead && (
-        <LeadDrawer
-          lead={drawerLead}
-          onClose={() => setDrawerLead(null)}
-          onEdit={() => { setSelectedLead(drawerLead) }}
-          onMoveStatus={handleMoveStatus}
-          onChecklistChange={(id, checklist) =>
-            setLeads(ls => ls.map(l => l.id === id ? { ...l, checklist } : l))
-          }
-          onDelete={async id => {
-            await supabase.from('leads').delete().eq('id', id)
-            setLeads(ls => ls.filter(l => l.id !== id))
-            setDrawerLead(null)
+        <ErrorBoundary inline>
+          <LeadDrawer
+            lead={drawerLead}
+            onClose={handleCloseDrawer}
+            onEdit={handleEditDrawer}
+            onMoveStatus={handleMoveStatus}
+            onChecklistChange={handleChecklistChange}
+            onDelete={handleDeleteLead}
+          />
+        </ErrorBoundary>
+      )}
+
+      {isNewLead && (
+        <NewLeadModal
+          initialStage={newLeadStage}
+          onClose={() => setIsNewLead(false)}
+          onSave={handleSave}
+          onCreated={lead => setDrawerLead(lead)}
+        />
+      )}
+
+      {!isNewLead && selectedLead && (
+        <LeadModal
+          lead={selectedLead}
+          isNew={false}
+          onClose={() => { setSelectedLead(null) }}
+          onSave={handleSave}
+        />
+      )}
+
+      {pendingTransition && (
+        <StageTransitionModal
+          lead={pendingTransition.lead}
+          toStage={pendingTransition.toStage}
+          onConfirm={(extraFields = {}) => {
+            handleMoveStatus(pendingTransition.lead, pendingTransition.toStage, extraFields)
+            setPendingTransition(null)
+          }}
+          onSkip={() => {
+            handleMoveStatus(pendingTransition.lead, pendingTransition.toStage)
+            setPendingTransition(null)
+          }}
+          onCancel={() => setPendingTransition(null)}
+          onOpenScorer={lead => {
+            setPendingTransition(null)
+            setDrawerLead(lead)
           }}
         />
       )}
 
-      {selectedLead && (
-        <LeadModal
-          lead={selectedLead}
-          isNew={isNewLead}
-          onClose={() => { setSelectedLead(null); setIsNewLead(false) }}
-          onSave={handleSave}
-        />
+      {/* ── Drag overlay — rendered in <body> so it floats above everything ── */}
+      {drag && createPortal(
+        <div
+          ref={overlayRef}
+          style={{
+            position: 'fixed',
+            top: 0, left: 0,
+            width: drag.w,
+            pointerEvents: 'none',
+            zIndex: 9999,
+            willChange: 'transform',
+            // Initial position off-screen; pointermove sets it on the first frame
+            transform: 'translate3d(-9999px, -9999px, 0)',
+            borderRadius: 12,
+            boxShadow: '0 24px 60px rgba(0,0,0,0.28), 0 6px 20px rgba(0,0,0,0.14)',
+          }}
+        >
+          <LeadCard
+            lead={drag.lead}
+            stageTint={STAGE_META[drag.lead.status]?.tint}
+            stageSoft={STAGE_META[drag.lead.status]?.soft}
+            isDragging={false}
+          />
+        </div>,
+        document.body,
       )}
     </div>
   )

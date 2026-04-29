@@ -3,7 +3,7 @@ import { Calendar, Plus, Trash2, X, ExternalLink, Download, CalendarPlus, Buildi
 import { supabase } from '../lib/supabase'
 import { useTeam } from '../lib/TeamContext'
 import { useAuth } from '../lib/AuthContext'
-import { MOCK_LEADS } from '../lib/mockData'
+import logger from '../lib/logger'
 
 // ── Calendar export helpers ───────────────────────────────────
 
@@ -386,6 +386,7 @@ function ConsultCard({ lead, member }) {
 // ── Meeting card ──────────────────────────────────────────────
 
 function MeetingCard({ meeting, member, onDelete, onEdit }) {
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const timeLabel = meeting.time
     ? new Date(`2000-01-01T${meeting.time}`).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
     : 'All day'
@@ -446,9 +447,22 @@ function MeetingCard({ meeting, member, onDelete, onEdit }) {
       <button onClick={() => onEdit(meeting)} title="Edit meeting" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-3)', padding: 4, flexShrink: 0 }}>
         <Pencil size={14} />
       </button>
-      <button onClick={() => onDelete(meeting.id)} title="Delete meeting" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-3)', padding: 4, flexShrink: 0 }}>
-        <Trash2 size={14} />
-      </button>
+      {confirmDelete ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+          <button
+            onClick={() => { onDelete(meeting.id); setConfirmDelete(false) }}
+            style={{ padding: '3px 8px', borderRadius: 6, border: 'none', background: 'var(--lose)', color: 'white', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}
+          >Delete</button>
+          <button
+            onClick={() => setConfirmDelete(false)}
+            style={{ padding: '3px 8px', borderRadius: 6, border: '1px solid var(--line)', background: 'var(--panel)', color: 'var(--ink-2)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}
+          >Cancel</button>
+        </div>
+      ) : (
+        <button onClick={() => setConfirmDelete(true)} title="Delete meeting" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-3)', padding: 4, flexShrink: 0 }}>
+          <Trash2 size={14} />
+        </button>
+      )}
     </div>
   )
 }
@@ -477,6 +491,7 @@ export default function CalendarView() {
   const [meetings, setMeetings]         = useState([])
   const [contacts, setContacts]         = useState([])
   const [loading, setLoading]           = useState(true)
+  const [error, setError]               = useState(null)
   const [showManage, setShowManage]         = useState(false)
   const [showAddMeeting, setShowAddMeeting] = useState(false)
   const [editingMeeting, setEditingMeeting] = useState(null)
@@ -486,15 +501,31 @@ export default function CalendarView() {
 
   async function fetchAll() {
     setLoading(true)
-    const [{ data: leadsData }, { data: meetingsData }, { data: contactsData }] = await Promise.all([
-      supabase.from('leads').select('*').not('consult_at', 'is', null).order('consult_at', { ascending: true }),
-      supabase.from('meetings').select('*, contacts(name, category)').order('date', { ascending: true }),
-      supabase.from('contacts').select('*').order('name'),
-    ])
-    const mockConsults = MOCK_LEADS.filter(l => l.consult_at)
-    setLeads(leadsData && leadsData.length > 0 ? leadsData : mockConsults)
-    setMeetings(meetingsData || [])
-    setContacts(contactsData || [])
+    setError(null)
+    try {
+      const [
+        { data: leadsData,    error: leadsErr    },
+        { data: meetingsData, error: meetingsErr  },
+        { data: contactsData, error: contactsErr  },
+      ] = await Promise.all([
+        supabase.from('leads').select('*').not('consult_at', 'is', null).order('consult_at', { ascending: true }),
+        supabase.from('meetings').select('*, contacts(name, category)').order('date', { ascending: true }),
+        supabase.from('contacts').select('*').order('name'),
+      ])
+
+      if (leadsErr || meetingsErr || contactsErr) {
+        const err = leadsErr || meetingsErr || contactsErr
+        logger.error('CalendarView fetchAll error', err)
+        setError('Failed to load calendar data. Please try again.')
+      }
+
+      setLeads(leadsData || [])
+      setMeetings(meetingsData || [])
+      setContacts(contactsData || [])
+    } catch (e) {
+      logger.error('CalendarView fetchAll threw', e)
+      setError('Failed to load calendar data. Please try again.')
+    }
     setLoading(false)
   }
 
@@ -619,6 +650,12 @@ export default function CalendarView() {
           </svg>
         </div>
 
+        {error && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, padding: '10px 14px', borderRadius: 9, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#ef4444', fontSize: 13 }}>
+            {error}
+            <button className="btn btn-secondary" onClick={fetchAll} style={{ marginLeft: 'auto', fontSize: 12 }}>Retry</button>
+          </div>
+        )}
         {loading ? (
           <div style={{ color: 'var(--ink-3)', fontSize: 14 }}>Loading…</div>
         ) : upcoming.length === 0 && past.length === 0 ? (

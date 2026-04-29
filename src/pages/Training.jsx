@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useRef } from 'react'
 import DOMPurify from 'dompurify'
 import { Plus, Search, BookOpen, Pencil, Trash2, X, ChevronLeft, Bold, Italic, List, Heading2, Clock } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
+import { useSupabaseQuery } from '../lib/useSupabaseQuery'
 
 const CATEGORIES = ['Onboarding', 'Clean Out', 'Auction', 'Senior Care', 'Sales', 'Operations', 'Safety', 'Tech', 'Other']
 
@@ -39,7 +40,7 @@ function RichEditor({ value, onChange }) {
   const lastHtml = useRef(value)
 
   useEffect(() => {
-    if (ref.current && ref.current.innerHTML !== value) ref.current.innerHTML = value
+    if (ref.current && ref.current.innerHTML !== value) ref.current.innerHTML = DOMPurify.sanitize(value)
   }, [])
 
   function handleInput() {
@@ -238,21 +239,16 @@ function ModuleCard({ guide, onClick, onEdit, onDelete, index }) {
 
 export default function Training() {
   const { organizationId } = useAuth()
-  const [guides, setGuides]           = useState([])
-  const [loading, setLoading]         = useState(true)
   const [search, setSearch]           = useState('')
   const [filterCat, setFilterCat]     = useState('All')
   const [selectedGuide, setSelectedGuide] = useState(null)
   const [modalGuide, setModalGuide]   = useState(null)
 
-  useEffect(() => { fetchGuides() }, [])
-
-  async function fetchGuides() {
-    setLoading(true)
-    const { data } = await supabase.from('training_guides').select('*').order('created_at', { ascending: false })
-    setGuides(data || [])
-    setLoading(false)
-  }
+  const { data: guides = [], loading, error, refetch: refetchGuides } = useSupabaseQuery(async () => {
+    const { data, error } = await supabase.from('training_guides').select('*').order('created_at', { ascending: false })
+    if (error) throw error
+    return data || []
+  }, [], { errorMessage: 'Failed to load training guides. Please try again.' })
 
   async function handleSave(form) {
     const payload = {
@@ -268,14 +264,14 @@ export default function Training() {
       const { error } = await supabase.from('training_guides').update(payload).eq('id', form.id)
       if (error) throw new Error(error.message)
     }
-    await fetchGuides()
+    await refetchGuides()
   }
 
   async function handleDelete(guide) {
     if (!confirm(`Delete "${guide.title}"?`)) return
     await supabase.from('training_guides').delete().eq('id', guide.id)
     setSelectedGuide(null)
-    await fetchGuides()
+    await refetchGuides()
   }
 
   const categories = ['All', ...CATEGORIES.filter(c => guides.some(g => g.category === c))]
@@ -339,7 +335,9 @@ export default function Training() {
 
       {/* Category sections or grid */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
-        {loading ? (
+        {error ? (
+          <div style={{ textAlign: 'center', color: 'var(--lose)', fontSize: 13, marginTop: 60 }}>{error}</div>
+        ) : loading ? (
           <div style={{ textAlign: 'center', color: 'var(--ink-4)', fontSize: 13, marginTop: 60 }}>Loading guides…</div>
         ) : filtered.length === 0 ? (
           <div style={{ textAlign: 'center', color: 'var(--ink-4)', fontSize: 13, marginTop: 60 }}>

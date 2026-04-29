@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Plus, Search, Copy, Pencil, Trash2, FileText, CheckCheck, X, Save } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import logger from '../lib/logger'
 import { useAuth } from '../lib/AuthContext'
+import { useSupabaseQuery } from '../lib/useSupabaseQuery'
 
 const CATEGORIES = ['Follow-up', 'Intro', 'Estimate', 'Thank You', 'Scheduling', 'Other']
 
@@ -125,8 +126,6 @@ function EditModal({ template, onClose, onSave }) {
 
 export default function Templates() {
   const { organizationId } = useAuth()
-  const [templates, setTemplates] = useState([])
-  const [loading, setLoading]     = useState(true)
   const [selected, setSelected]   = useState(null)
   const [search, setSearch]       = useState('')
   const [filterCat, setFilterCat] = useState('All')
@@ -134,18 +133,14 @@ export default function Templates() {
   const [editTemplate, setEditTemplate] = useState(null)
   const [showModal, setShowModal] = useState(false)
 
-  useEffect(() => { fetchTemplates() }, [])
-
-  async function fetchTemplates() {
-    setLoading(true)
+  const { data: templates = [], loading, error, refetch: refetchTemplates } = useSupabaseQuery(async () => {
     const { data, error } = await supabase
       .from('email_templates')
       .select('*')
       .order('created_at', { ascending: true })
-    if (error) logger.error('Fetch templates failed', error)
-    setTemplates(data || [])
-    setLoading(false)
-  }
+    if (error) throw error
+    return data || []
+  }, [], { errorMessage: 'Failed to load templates. Please try again.' })
 
   async function handleSave(form) {
     if (form.id) {
@@ -160,14 +155,14 @@ export default function Templates() {
         .insert({ name: form.name, category: form.category, subject: form.subject, body: form.body, organization_id: organizationId })
       if (error) throw new Error(error.message)
     }
-    await fetchTemplates()
+    await refetchTemplates()
   }
 
   async function handleDelete(id) {
     const { error } = await supabase.from('email_templates').delete().eq('id', id)
     if (error) { logger.error('Delete template failed', error); return }
-    setTemplates(ts => ts.filter(t => t.id !== id))
     if (selected?.id === id) setSelected(null)
+    await refetchTemplates()
   }
 
   const filtered = templates.filter(t => {
@@ -235,12 +230,17 @@ export default function Templates() {
               style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontSize: 12.5, color: 'var(--ink-1)', fontFamily: 'inherit' }} />
           </div>
           <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 6, paddingLeft: 2 }}>
-            {loading ? 'Loading…' : `${filtered.length} template${filtered.length !== 1 ? 's' : ''}`}
+            {loading ? 'Loading…' : error ? 'Error' : `${filtered.length} template${filtered.length !== 1 ? 's' : ''}`}
           </div>
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto' }}>
-          {!loading && filtered.map(t => {
+          {error ? (
+            <div style={{ padding: 20, fontSize: 12, color: 'var(--lose)' }}>{error}</div>
+          ) : loading ? (
+            <div style={{ padding: 20, textAlign: 'center', color: 'var(--ink-4)', fontSize: 12 }}>Loading…</div>
+          ) : null}
+          {!loading && !error && filtered.map(t => {
             const meta = CAT_META[t.category] || { color: '#6B7280' }
             const isSelected = selected?.id === t.id
             return (

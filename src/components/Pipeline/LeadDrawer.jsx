@@ -6,6 +6,7 @@ import { supabase } from '../../lib/supabase'
 import { PIPELINE_STAGES } from '../../lib/constants'
 import SendEstimateModal from './SendEstimateModal'
 import ScheduleProjectModal from './ScheduleProjectModal'
+import AttachmentsSection from './AttachmentsSection'
 
 const JOB_BADGE = {
   'Clean Out': { bg: 'var(--b-cleanout-bg)', fg: 'var(--b-cleanout-fg)' },
@@ -537,6 +538,9 @@ export default function LeadDrawer({ lead, onClose, onEdit, onMoveStatus, onChec
               </div>
             </div>
           )}
+
+          {/* Attachments */}
+          <AttachmentsSection lead={lead} />
 
           {/* Notes */}
           {lead.notes && (

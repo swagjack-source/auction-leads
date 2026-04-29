@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react'
-import { ChevronLeft, ChevronRight, Download, AlertCircle, X, Rss, Check, Copy, Plus } from 'lucide-react'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { ChevronLeft, ChevronRight, Download, AlertCircle, X, Rss, Check, Copy, Plus, MapPin, ExternalLink } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { estimateCrew, estimateProjectDays } from '../lib/scoring'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { useTeam } from '../lib/TeamContext'
+import { useAuth } from '../lib/AuthContext'
 import NewMeetingModal from '../components/modals/NewMeetingModal'
 
 // ── Date helpers ──────────────────────────────────────────────
@@ -41,13 +42,29 @@ function fmtConsultTime(isoStr) {
   return new Date(isoStr).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 }
 
-function consultsForDay(dayStr, projects) {
-  return projects.filter(p => {
-    if (!p.consult_at) return false
-    const d = new Date(p.consult_at)
-    const localDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-    return localDate === dayStr
-  })
+function fmtTime(timeStr) {
+  if (!timeStr) return ''
+  const [h, m] = timeStr.split(':').map(Number)
+  const ampm = h < 12 ? 'AM' : 'PM'
+  const h12 = h % 12 || 12
+  return `${h12}:${String(m).padStart(2, '0')} ${ampm}`
+}
+
+function fmtDateRange(startStr, endStr) {
+  if (!startStr) return ''
+  const opts = { month: 'short', day: 'numeric' }
+  const s = new Date(startStr + 'T00:00:00').toLocaleDateString([], opts)
+  if (!endStr || endStr === startStr) return s
+  const e = new Date(endStr + 'T00:00:00').toLocaleDateString([], opts)
+  return `${s} – ${e}`
+}
+
+function consultsForDay(dayStr, consults) {
+  return consults.filter(c => c.date === dayStr)
+}
+
+function meetingsForDay(dayStr, meetings) {
+  return meetings.filter(m => m.date === dayStr)
 }
 
 // ── Colors ────────────────────────────────────────────────────
@@ -199,9 +216,405 @@ function assignLanes(rowProjects) {
   })
 }
 
+// ── Event Popover ─────────────────────────────────────────────
+
+function EventPopover({ event, anchorRect, memberMap, onClose }) {
+  const ref = useRef(null)
+
+  useEffect(() => {
+    function onKey(e) { if (e.key === 'Escape') onClose() }
+    function onClickOutside(e) {
+      if (ref.current && !ref.current.contains(e.target)) onClose()
+    }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('mousedown', onClickOutside)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('mousedown', onClickOutside)
+    }
+  }, [onClose])
+
+  if (!anchorRect) return null
+
+  // Position: try to appear below-right, but avoid going off screen
+  const W = 280
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  let left = anchorRect.left
+  let top = anchorRect.bottom + 6
+  if (left + W > vw - 12) left = vw - W - 12
+  if (left < 8) left = 8
+  // if too close to bottom, flip above
+  if (top + 260 > vh) top = anchorRect.top - 266
+
+  const mapsUrl = event.address
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(event.address)}`
+    : null
+
+  const member = event.assigned_to
+    ? memberMap[event.assigned_to]
+    : event.assignee_id
+      ? memberMap[event.assignee_id]
+      : null
+
+  return (
+    <div
+      ref={ref}
+      style={{
+        position: 'fixed',
+        top, left,
+        width: W,
+        zIndex: 200,
+        background: 'var(--panel)',
+        border: '1px solid var(--line)',
+        borderRadius: 12,
+        boxShadow: '0 8px 32px rgba(0,0,0,0.22)',
+        padding: 16,
+        minWidth: 240,
+        maxWidth: 320,
+      }}
+    >
+      {/* Close btn */}
+      <button onClick={onClose} style={{ position: 'absolute', top: 10, right: 10, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-3)', padding: 2 }}>
+        <X size={14} />
+      </button>
+
+      {event.type === 'project' && (
+        <>
+          <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--ink-1)', marginBottom: 6, paddingRight: 20 }}>{event.name}</div>
+          {event.job_type && (
+            <span style={{ background: (JOB_CHIP[event.job_type] || JOB_CHIP['Both']).bg, color: (JOB_CHIP[event.job_type] || JOB_CHIP['Both']).accent, borderRadius: 5, padding: '2px 8px', fontSize: 11, fontWeight: 700, marginBottom: 10, display: 'inline-block' }}>
+              {event.job_type}
+            </span>
+          )}
+          <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ fontSize: 12, color: 'var(--ink-2)' }}>
+              <span style={{ fontWeight: 600, color: 'var(--ink-3)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.4px' }}>Dates </span>
+              {fmtDateRange(event.project_start, event.project_end)}
+            </div>
+            {member && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ink-2)' }}>
+                <MemberAvatar member={member} size={18} />
+                {member.name}
+              </div>
+            )}
+            {event.address && (
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 5, fontSize: 12, color: 'var(--ink-2)' }}>
+                <MapPin size={12} style={{ marginTop: 2, flexShrink: 0, color: 'var(--ink-3)' }} />
+                <span>{event.address}</span>
+              </div>
+            )}
+          </div>
+          <div style={{ marginTop: 12, display: 'flex', gap: 6 }}>
+            {mapsUrl && (
+              <a href={mapsUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: '#3b82f6', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+                <MapPin size={12} /> Directions
+              </a>
+            )}
+            <a href="/projects" style={{ marginLeft: 'auto', background: 'linear-gradient(135deg,#A50050,#CD545B)', borderRadius: 7, padding: '5px 12px', color: '#fff', fontSize: 12, fontWeight: 600, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <ExternalLink size={12} /> Open Project
+            </a>
+          </div>
+        </>
+      )}
+
+      {event.type === 'consult' && (
+        <>
+          <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--ink-1)', marginBottom: 4, paddingRight: 20 }}>{event.name}</div>
+          {event.time && <div style={{ fontSize: 12, color: '#7F77DD', fontWeight: 600, marginBottom: 8 }}>{fmtTime(event.time)}</div>}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {member && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ink-2)' }}>
+                <MemberAvatar member={member} size={18} />
+                {member.name}
+              </div>
+            )}
+            {event.address && (
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 5, fontSize: 12, color: 'var(--ink-2)' }}>
+                <MapPin size={12} style={{ marginTop: 2, flexShrink: 0, color: 'var(--ink-3)' }} />
+                <span>{event.address}</span>
+              </div>
+            )}
+          </div>
+          {mapsUrl && (
+            <div style={{ marginTop: 10 }}>
+              <a href={mapsUrl} target="_blank" rel="noreferrer" style={{ background: 'rgba(127,119,221,0.12)', border: '1px solid rgba(127,119,221,0.3)', borderRadius: 7, padding: '5px 12px', color: '#7F77DD', fontSize: 12, fontWeight: 600, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <MapPin size={12} /> Get Directions
+              </a>
+            </div>
+          )}
+        </>
+      )}
+
+      {event.type === 'meeting' && (
+        <>
+          <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--ink-1)', marginBottom: 4, paddingRight: 20 }}>{event.title}</div>
+          {event.time && <div style={{ fontSize: 12, color: '#1D9E75', fontWeight: 600, marginBottom: 8 }}>{fmtTime(event.time)}</div>}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {member && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ink-2)' }}>
+                <MemberAvatar member={member} size={18} />
+                {member.name}
+              </div>
+            )}
+            {event.address && (
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 5, fontSize: 12, color: 'var(--ink-2)' }}>
+                <MapPin size={12} style={{ marginTop: 2, flexShrink: 0, color: 'var(--ink-3)' }} />
+                <span>{event.address}</span>
+              </div>
+            )}
+            {event.notes && (
+              <div style={{ fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.4, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                {event.notes}
+              </div>
+            )}
+          </div>
+          <div style={{ marginTop: 10, display: 'flex', gap: 6 }}>
+            <button onClick={onClose} style={{ background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 7, padding: '5px 12px', color: 'var(--ink-2)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+              Edit
+            </button>
+            <button onClick={onClose} style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 7, padding: '5px 12px', color: '#ef4444', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+              Delete
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ── Quick Add Event Modal ─────────────────────────────────────
+
+function QuickAddEventModal({ initialDate, leads, members, onClose, onSaved }) {
+  const { organizationId } = useAuth()
+  const [type, setType] = useState('consult')
+  const [date, setDate] = useState(initialDate || '')
+  const [time, setTime] = useState('')
+  const [selectedLead, setSelectedLead] = useState('')
+  const [assignedTo, setAssignedTo] = useState('')
+  const [address, setAddress] = useState('')
+  const [title, setTitle] = useState('')
+  const [location, setLocation] = useState('')
+  const [notes, setNotes] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const consultLeads = leads.filter(l => !['Won', 'Lost'].includes(l.status))
+
+  function handleLeadChange(leadId) {
+    setSelectedLead(leadId)
+    const lead = leads.find(l => l.id === leadId)
+    if (lead) setAddress(lead.address || '')
+  }
+
+  async function handleSave() {
+    setError('')
+    if (type === 'consult') {
+      if (!selectedLead) { setError('Please select a client'); return }
+      if (!date) { setError('Please pick a date'); return }
+    } else {
+      if (!title.trim()) { setError('Please enter a title'); return }
+      if (!date) { setError('Please pick a date'); return }
+    }
+
+    setSaving(true)
+    try {
+      if (type === 'consult') {
+        const lead = leads.find(l => l.id === selectedLead)
+        const isoDateTime = time ? `${date}T${time}:00` : `${date}T09:00:00`
+
+        await supabase.from('calendar_events').insert({
+          title: lead?.name || 'Consult',
+          event_type: 'consult',
+          event_date: date,
+          event_time: time || null,
+          address: address || null,
+          assigned_to: assignedTo || null,
+          lead_id: selectedLead,
+        })
+
+        if (lead && lead.status !== 'Consult Scheduled') {
+          await supabase.from('leads').update({
+            consult_at: isoDateTime,
+            status: 'Consult Scheduled',
+          }).eq('id', selectedLead)
+        } else if (lead) {
+          await supabase.from('leads').update({ consult_at: isoDateTime }).eq('id', selectedLead)
+        }
+      } else {
+        await supabase.from('meetings').insert({
+          title: title.trim(),
+          date,
+          time: time || null,
+          address: location || null,
+          notes: notes || null,
+          assignee_id: assignedTo || null,
+        })
+      }
+      onSaved()
+    } catch (e) {
+      setError('Failed to save. Please try again.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+    >
+      <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 14, width: '100%', maxWidth: 440, boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
+        {/* Header */}
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--ink-1)' }}>Add Event</div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-3)' }}><X size={18} /></button>
+        </div>
+
+        {/* Type toggle */}
+        <div style={{ padding: '14px 20px 0', display: 'flex', gap: 8 }}>
+          {[['consult', 'Consult', '#7F77DD'], ['meeting', 'Meeting', '#1D9E75']].map(([val, label, color]) => (
+            <button
+              key={val}
+              onClick={() => setType(val)}
+              style={{
+                background: type === val ? `rgba(${val === 'consult' ? '127,119,221' : '29,158,117'},0.12)` : 'var(--bg)',
+                border: `1.5px solid ${type === val ? color : 'var(--line)'}`,
+                borderRadius: 8,
+                padding: '7px 18px',
+                color: type === val ? color : 'var(--ink-3)',
+                fontSize: 13, fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* Form */}
+        <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {type === 'consult' && (
+            <>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: 5 }}>Client *</label>
+                <select
+                  value={selectedLead}
+                  onChange={e => handleLeadChange(e.target.value)}
+                  style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 12px', color: 'var(--ink-1)', fontSize: 13, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }}
+                >
+                  <option value="">Select client…</option>
+                  {consultLeads.map(l => (
+                    <option key={l.id} value={l.id}>{l.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: 5 }}>Address</label>
+                <input
+                  type="text" value={address} onChange={e => setAddress(e.target.value)}
+                  placeholder="Auto-filled from lead"
+                  style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 12px', color: 'var(--ink-1)', fontSize: 13, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }}
+                />
+              </div>
+            </>
+          )}
+
+          {type === 'meeting' && (
+            <>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: 5 }}>Title *</label>
+                <input
+                  type="text" value={title} onChange={e => setTitle(e.target.value)}
+                  placeholder="Meeting title"
+                  style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 12px', color: 'var(--ink-1)', fontSize: 13, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: 5 }}>Location</label>
+                <input
+                  type="text" value={location} onChange={e => setLocation(e.target.value)}
+                  placeholder="Address or location"
+                  style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 12px', color: 'var(--ink-1)', fontSize: 13, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }}
+                />
+              </div>
+            </>
+          )}
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: 5 }}>Date *</label>
+              <input
+                type="date" value={date} onChange={e => setDate(e.target.value)}
+                style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 12px', color: 'var(--ink-1)', fontSize: 13, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }}
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: 5 }}>Time</label>
+              <input
+                type="time" value={time} onChange={e => setTime(e.target.value)}
+                style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 12px', color: 'var(--ink-1)', fontSize: 13, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: 5 }}>Assign To</label>
+            <select
+              value={assignedTo}
+              onChange={e => setAssignedTo(e.target.value)}
+              style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 12px', color: 'var(--ink-1)', fontSize: 13, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }}
+            >
+              <option value="">Unassigned</option>
+              {members.map(m => (
+                <option key={m.id} value={m.id}>{m.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {type === 'meeting' && (
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: 5 }}>Notes</label>
+              <textarea
+                value={notes} onChange={e => setNotes(e.target.value)}
+                rows={3}
+                placeholder="Optional notes…"
+                style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 12px', color: 'var(--ink-1)', fontSize: 13, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box', resize: 'vertical' }}
+              />
+            </div>
+          )}
+
+          {error && (
+            <div style={{ fontSize: 12, color: '#ef4444', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 7, padding: '7px 12px' }}>
+              {error}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: '12px 20px', borderTop: '1px solid var(--line)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={onClose} style={{ flex: 1, background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 8, padding: '9px', color: 'var(--ink-2)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+              Cancel
+            </button>
+            <button
+              onClick={handleSave} disabled={saving}
+              style={{ flex: 2, background: 'linear-gradient(135deg,#A50050,#CD545B)', border: 'none', borderRadius: 8, padding: '9px', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: saving ? 0.7 : 1 }}
+            >
+              {saving ? 'Saving…' : 'Add Event'}
+            </button>
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--ink-3)', textAlign: 'center' }}>
+            To add a project, schedule it from the Pipeline or Projects page.
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Month View ────────────────────────────────────────────────
 
-function MonthView({ projects, viewDate, todayStr, memberMap, onProjectClick }) {
+function MonthView({ projects, consults, meetings, viewDate, todayStr, memberMap, onProjectClick, onEventClick, onDayCellClick, showTypes, activeEmployeeCount = 4 }) {
   const year = viewDate.getFullYear()
   const month = viewDate.getMonth()
   const grid = getMonthGrid(year, month)
@@ -266,17 +679,58 @@ function MonthView({ projects, viewDate, todayStr, memberMap, onProjectClick }) 
                 const isCurrentMonth = date.getMonth() === month
                 const isToday = dayStr === todayStr
                 const isWeekend = date.getDay() === 0 || date.getDay() === 6
-                const dayCons = consultsForDay(dayStr, projects)
+                const isPast = dayStr < todayStr
+
+                // Day capacity calculation
+                const dayProjects = scheduled.filter(p => {
+                  const end = p.project_end || p.project_start
+                  return p.project_start <= dayStr && end >= dayStr
+                })
+                let totalHours = 0
+                dayProjects.forEach(p => {
+                  const start = new Date(p.project_start + 'T00:00:00')
+                  const end = p.project_end ? new Date(p.project_end + 'T00:00:00') : start
+                  const projectDays = Math.max(Math.round((end - start) / 86400000) + 1, 1)
+                  const dailyHours = (p.square_footage ? Math.round(p.square_footage * 0.008) : 8) / projectDays
+                  totalHours += dailyHours
+                })
+                const capacity = activeEmployeeCount * 8
+                const utilization = capacity > 0 ? totalHours / capacity : 0
+
+                let capacityBg = 'transparent'
+                if (utilization > 0 && utilization < 0.75) capacityBg = 'rgba(34,197,94,0.06)'
+                else if (utilization >= 0.75 && utilization < 1) capacityBg = 'rgba(245,158,11,0.08)'
+                else if (utilization >= 1) capacityBg = 'rgba(239,68,68,0.08)'
+
+                const baseBg = isToday
+                  ? 'rgba(59,130,246,0.06)'
+                  : isWeekend && isCurrentMonth
+                    ? 'var(--stripe)'
+                    : 'transparent'
+
+                // For today we layer capacity on top with a blend — use a div overlay instead
+                const dayCons = showTypes.consults ? consultsForDay(dayStr, consults) : []
+                const dayMeetings = showTypes.meetings ? meetingsForDay(dayStr, meetings) : []
 
                 return (
-                  <div key={dayStr} style={{
-                    borderRight: col < 6 ? '1px solid var(--line)' : 'none',
-                    borderBottom: '1px solid var(--line)',
-                    background: isToday ? 'rgba(165,0,80,0.04)' : isWeekend && isCurrentMonth ? 'var(--stripe)' : 'transparent',
-                    overflow: 'hidden',
-                  }}>
+                  <div
+                    key={dayStr}
+                    onClick={() => onDayCellClick?.(dayStr)}
+                    style={{
+                      borderRight: col < 6 ? '1px solid var(--line)' : 'none',
+                      borderBottom: '1px solid var(--line)',
+                      background: baseBg,
+                      overflow: 'hidden',
+                      cursor: 'pointer',
+                      position: 'relative',
+                    }}
+                  >
+                    {/* Capacity tint overlay */}
+                    {capacityBg !== 'transparent' && (
+                      <div style={{ position: 'absolute', inset: 0, background: capacityBg, pointerEvents: 'none', zIndex: 0 }} />
+                    )}
                     {/* Day number */}
-                    <div style={{ height: DAY_NUM_H, display: 'flex', justifyContent: 'flex-end', padding: '5px 7px 0' }}>
+                    <div style={{ height: DAY_NUM_H, display: 'flex', justifyContent: 'flex-end', padding: '5px 7px 0', position: 'relative', zIndex: 1 }}>
                       <span style={isToday ? {
                         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                         width: 22, height: 22, borderRadius: '50%',
@@ -290,22 +744,28 @@ function MonthView({ projects, viewDate, todayStr, memberMap, onProjectClick }) 
                       </span>
                     </div>
                     {/* Spacer for project bar lanes */}
-                    <div style={{ height: barAreaH }} />
+                    <div style={{ height: barAreaH, position: 'relative', zIndex: 1 }} />
                     {/* Consult chips */}
                     {dayCons.length > 0 && (
-                      <div style={{ padding: '2px 4px 4px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      <div style={{ padding: '2px 4px 4px', display: 'flex', flexDirection: 'column', gap: 2, position: 'relative', zIndex: 1 }}>
                         {dayCons.slice(0, 2).map(c => {
                           const member = c.assigned_to ? memberMap[c.assigned_to] : null
                           return (
-                            <div key={c.id} style={{
-                              display: 'flex', alignItems: 'center', gap: 4,
-                              background: 'rgba(234,179,8,0.18)', borderRadius: 3,
-                              padding: '2px 5px', fontSize: 10.5, color: 'var(--ink-1)',
-                              whiteSpace: 'nowrap', overflow: 'hidden', lineHeight: '16px',
-                            }}>
+                            <div
+                              key={c.id}
+                              onClick={e => { e.stopPropagation(); onEventClick?.(c, e.currentTarget.getBoundingClientRect()) }}
+                              style={{
+                                display: 'flex', alignItems: 'center', gap: 4,
+                                background: 'rgba(127,119,221,0.18)', borderRadius: 3,
+                                padding: '2px 5px', fontSize: 10.5, color: '#7F77DD',
+                                whiteSpace: 'nowrap', overflow: 'hidden', lineHeight: '16px',
+                                opacity: isPast ? 0.4 : 1,
+                                cursor: 'pointer',
+                              }}
+                            >
                               {member && <MemberAvatar member={member} size={14} />}
                               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                {fmtConsultTime(c.consult_at)} · {c.name}
+                                {c.time ? fmtTime(c.time) + ' · ' : ''}{c.name}
                               </span>
                             </div>
                           )
@@ -317,22 +777,56 @@ function MonthView({ projects, viewDate, todayStr, memberMap, onProjectClick }) 
                         )}
                       </div>
                     )}
+                    {/* Meeting pills */}
+                    {dayMeetings.length > 0 && (
+                      <div style={{ padding: '2px 4px 4px', display: 'flex', flexDirection: 'column', gap: 2, position: 'relative', zIndex: 1 }}>
+                        {dayMeetings.slice(0, 2).map(m => {
+                          const member = m.assignee_id ? memberMap[m.assignee_id] : null
+                          return (
+                            <div
+                              key={m.id}
+                              onClick={e => { e.stopPropagation(); onEventClick?.(m, e.currentTarget.getBoundingClientRect()) }}
+                              style={{
+                                display: 'flex', alignItems: 'center', gap: 4,
+                                background: 'rgba(29,158,117,0.18)', borderRadius: 3,
+                                padding: '2px 5px', fontSize: 10.5, color: '#1D9E75',
+                                whiteSpace: 'nowrap', overflow: 'hidden', lineHeight: '16px',
+                                opacity: isPast ? 0.4 : 1,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              {member && <MemberAvatar member={member} size={14} />}
+                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {m.time ? fmtTime(m.time) + ' · ' : ''}{m.title}
+                              </span>
+                            </div>
+                          )
+                        })}
+                        {dayMeetings.length > 2 && (
+                          <div style={{ fontSize: 10, color: 'var(--ink-3)', padding: '0 5px' }}>
+                            +{dayMeetings.length - 2} more
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )
               })}
 
               {/* Spanning project bars */}
-              {laidOut.map(p => {
+              {showTypes.projects && laidOut.map(p => {
                 const chip = JOB_CHIP[p.job_type] || JOB_CHIP['Both']
                 const member = p.assigned_to ? memberMap[p.assigned_to] : null
                 const leftPct = (p.startCol / 7) * 100
                 const widthPct = ((p.endCol - p.startCol + 1) / 7) * 100
                 const topPx = DAY_NUM_H + p.lane * (BAR_H + BAR_GAP) + 2
+                const projectEnd = p.project_end || p.project_start
+                const isPast = projectEnd < todayStr
 
                 return (
                   <div
                     key={`${p.id}-w${weekIdx}`}
-                    onClick={() => onProjectClick(p)}
+                    onClick={e => { e.stopPropagation(); onProjectClick(p) }}
                     title={`${p.name} — ${p.job_type}`}
                     style={{
                       position: 'absolute',
@@ -351,6 +845,7 @@ function MonthView({ projects, viewDate, todayStr, memberMap, onProjectClick }) 
                       overflow: 'hidden',
                       zIndex: 3,
                       transition: 'filter 0.1s',
+                      opacity: isPast ? 0.4 : 1,
                     }}
                     onMouseEnter={e => e.currentTarget.style.filter = 'brightness(0.92)'}
                     onMouseLeave={e => e.currentTarget.style.filter = 'none'}
@@ -382,7 +877,7 @@ function MonthView({ projects, viewDate, todayStr, memberMap, onProjectClick }) 
 
 const HOURS = Array.from({ length: 14 }, (_, i) => i + 7) // 7 AM – 8 PM
 
-function WeekView({ projects, viewDate, todayStr, memberMap, onProjectClick }) {
+function WeekView({ projects, consults, meetings, viewDate, todayStr, memberMap, onProjectClick, onEventClick, showTypes }) {
   const weekStart = getWeekStart(viewDate)
   const weekDays = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(weekStart)
@@ -430,7 +925,7 @@ function WeekView({ projects, viewDate, todayStr, memberMap, onProjectClick }) {
             <div key={dayStr} style={{
               padding: '8px 0', textAlign: 'center',
               borderRight: col < 6 ? '1px solid var(--line)' : 'none',
-              background: isToday ? 'rgba(165,0,80,0.04)' : 'transparent',
+              background: isToday ? 'rgba(59,130,246,0.06)' : 'transparent',
             }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: isWeekend ? '#A50050' : 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                 {DAY_HEADERS[date.getDay()]}
@@ -448,7 +943,7 @@ function WeekView({ projects, viewDate, todayStr, memberMap, onProjectClick }) {
       </div>
 
       {/* All-day project bars */}
-      {numLanes > 0 && (
+      {showTypes.projects && numLanes > 0 && (
         <div style={{ position: 'relative', height: allDayH + 4, flexShrink: 0, borderBottom: '2px solid var(--line)' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '52px repeat(7, 1fr)', height: '100%' }}>
             <div style={{ borderRight: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -465,6 +960,8 @@ function WeekView({ projects, viewDate, todayStr, memberMap, onProjectClick }) {
             const leftVal = `calc(52px + ${p.startCol} * ${colW} + ${p.continuedFrom ? 0 : 2}px)`
             const widthVal = `calc(${p.endCol - p.startCol + 1} * ${colW} - ${p.continuedFrom ? 0 : 2}px - ${p.continuesTo ? 0 : 2}px)`
             const topPx = p.lane * (BAR_H + BAR_GAP) + 4
+            const projectEnd = p.project_end || p.project_start
+            const isPast = projectEnd < todayStr
 
             return (
               <div
@@ -479,6 +976,7 @@ function WeekView({ projects, viewDate, todayStr, memberMap, onProjectClick }) {
                   display: 'flex', alignItems: 'center', padding: '0 5px',
                   cursor: 'pointer', overflow: 'hidden', zIndex: 3,
                   transition: 'filter 0.1s',
+                  opacity: isPast ? 0.4 : 1,
                 }}
                 onMouseEnter={e => e.currentTarget.style.filter = 'brightness(0.92)'}
                 onMouseLeave={e => e.currentTarget.style.filter = 'none'}
@@ -510,29 +1008,63 @@ function WeekView({ projects, viewDate, todayStr, memberMap, onProjectClick }) {
                 const dayStr = weekDayStrs[col]
                 const isToday = dayStr === todayStr
                 const isWeekend = date.getDay() === 0 || date.getDay() === 6
-                const hourConsults = consultsForDay(dayStr, projects).filter(c => {
-                  return new Date(c.consult_at).getHours() === hour
-                })
+                const isPast = dayStr < todayStr
+
+                const hourConsults = showTypes.consults
+                  ? consults.filter(c => c.date === dayStr && c.time && parseInt(c.time.split(':')[0]) === hour)
+                  : []
+                const hourMeetings = showTypes.meetings
+                  ? meetings.filter(m => m.date === dayStr && m.time && parseInt(m.time.split(':')[0]) === hour)
+                  : []
+
                 return (
                   <div key={col} style={{
                     borderRight: col < 6 ? '1px solid var(--line)' : 'none',
-                    background: isToday ? 'rgba(165,0,80,0.04)' : isWeekend ? 'var(--stripe)' : 'transparent',
+                    background: isToday ? 'rgba(59,130,246,0.06)' : isWeekend ? 'var(--stripe)' : 'transparent',
                     padding: 3,
                   }}>
                     {hourConsults.map(c => {
                       const member = c.assigned_to ? memberMap[c.assigned_to] : null
                       return (
-                        <div key={c.id} style={{
-                          background: 'rgba(124,58,237,0.15)',
-                          borderLeft: '3px solid #7c3aed',
-                          borderRadius: '0 4px 4px 0',
-                          padding: '3px 6px', fontSize: 11, color: '#a78bfa',
-                          display: 'flex', alignItems: 'center', gap: 4,
-                          marginBottom: 2,
-                        }}>
+                        <div
+                          key={c.id}
+                          onClick={() => onEventClick?.(c, null)}
+                          style={{
+                            background: 'rgba(124,58,237,0.15)',
+                            borderLeft: '3px solid #7c3aed',
+                            borderRadius: '0 4px 4px 0',
+                            padding: '3px 6px', fontSize: 11, color: '#a78bfa',
+                            display: 'flex', alignItems: 'center', gap: 4,
+                            marginBottom: 2, cursor: 'pointer',
+                            opacity: isPast ? 0.4 : 1,
+                          }}
+                        >
                           {member && <MemberAvatar member={member} size={14} />}
                           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {fmtConsultTime(c.consult_at)} · {c.name}
+                            {c.time ? fmtTime(c.time) : ''} · {c.name}
+                          </span>
+                        </div>
+                      )
+                    })}
+                    {hourMeetings.map(m => {
+                      const member = m.assignee_id ? memberMap[m.assignee_id] : null
+                      return (
+                        <div
+                          key={m.id}
+                          onClick={() => onEventClick?.(m, null)}
+                          style={{
+                            background: 'rgba(29,158,117,0.15)',
+                            borderLeft: '3px solid #1D9E75',
+                            borderRadius: '0 4px 4px 0',
+                            padding: '3px 6px', fontSize: 11, color: '#1D9E75',
+                            display: 'flex', alignItems: 'center', gap: 4,
+                            marginBottom: 2, cursor: 'pointer',
+                            opacity: isPast ? 0.4 : 1,
+                          }}
+                        >
+                          {member && <MemberAvatar member={member} size={14} />}
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {m.time ? fmtTime(m.time) : ''} · {m.title}
                           </span>
                         </div>
                       )
@@ -859,6 +1391,8 @@ function CalendarSyncModal({ onClose }) {
 
 export default function Schedule() {
   const [projects, setProjects] = useState([])
+  const [meetingsData, setMeetingsData] = useState([])
+  const [calEventsData, setCalEventsData] = useState([])
   const [loading, setLoading] = useState(true)
   const [viewDate, setViewDate] = useState(new Date())
   const [activeView, setActiveView] = useState('month')
@@ -866,6 +1400,10 @@ export default function Schedule() {
   const [showNewMeeting, setShowNewMeeting] = useState(false)
   const [showExport, setShowExport] = useState(false)
   const [showSync, setShowSync] = useState(false)
+  const [showTypes, setShowTypes] = useState({ projects: true, consults: true, meetings: true })
+  const [quickAddDate, setQuickAddDate] = useState(null)
+  const [popoverEvent, setPopoverEvent] = useState(null)
+  const [popoverRect, setPopoverRect] = useState(null)
   const isMobile = useIsMobile()
   const { members } = useTeam()
 
@@ -873,23 +1411,71 @@ export default function Schedule() {
 
   async function fetchProjects() {
     setLoading(true)
-    const { data } = await supabase
-      .from('leads')
-      .select('id, name, address, job_type, square_footage, density, project_start, project_end, crew_size, status, deal_score, consult_at, assigned_to, what_they_need, lead_source')
-      .not('status', 'eq', 'Lost')
-      .order('project_start', { ascending: true, nullsFirst: false })
-    setProjects((data || []).map(p => ({
-      ...p,
-      project_start: p.project_start ? p.project_start.slice(0, 10) : null,
-      project_end: p.project_end ? p.project_end.slice(0, 10) : null,
-    })))
-    setLoading(false)
+    try {
+      const [{ data: leadsData }, { data: meetingsRaw }, { data: calEventsRaw }] = await Promise.all([
+        supabase.from('leads')
+          .select('id,name,address,job_type,square_footage,density,project_start,project_end,crew_size,status,deal_score,consult_at,assigned_to,what_they_need,lead_source')
+          .not('status', 'eq', 'Lost')
+          .order('project_start', { ascending: true, nullsFirst: false }),
+        supabase.from('meetings').select('*').order('date', { ascending: true }),
+        supabase.from('calendar_events').select('*').order('event_date', { ascending: true }),
+      ])
+
+      setProjects((leadsData || []).map(p => ({
+        ...p,
+        project_start: p.project_start ? p.project_start.slice(0, 10) : null,
+        project_end: p.project_end ? p.project_end.slice(0, 10) : null,
+      })))
+      setMeetingsData(meetingsRaw || [])
+      setCalEventsData(calEventsRaw || [])
+    } finally {
+      setLoading(false)
+    }
   }
 
   const todayStr = toDateStr(new Date())
   const memberMap = Object.fromEntries(members.map(m => [m.id, m]))
   const scheduledProjects = projects.filter(p => p.project_start)
   const unscheduled = projects.filter(p => !p.project_start && !p.consult_at)
+
+  // ── Merged consults (deduplicated by lead_id) ─────────────────
+  const mergedConsults = (() => {
+    const fromLeads = projects
+      .filter(p => p.consult_at)
+      .map(p => {
+        const d = new Date(p.consult_at)
+        const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+        const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+        return { id: p.id, type: 'consult', date, time, name: p.name, address: p.address, assigned_to: p.assigned_to, lead_id: p.id }
+      })
+
+    const fromCalEvents = calEventsData
+      .filter(ce => ce.event_type === 'consult')
+      .map(ce => ({ id: ce.id, type: 'consult', date: ce.event_date, time: ce.event_time, name: ce.title, address: ce.address, assigned_to: ce.assigned_to, lead_id: ce.lead_id }))
+
+    // Deduplicate: if calEvent has a lead_id matching a lead consult, prefer calEvent
+    const calEventLeadIds = new Set(fromCalEvents.filter(c => c.lead_id).map(c => c.lead_id))
+    const filteredLeadConsults = fromLeads.filter(c => !calEventLeadIds.has(c.lead_id))
+
+    return [...filteredLeadConsults, ...fromCalEvents]
+  })()
+
+  // ── Merged meetings ───────────────────────────────────────────
+  const mergedMeetings = (() => {
+    const fromMeetings = meetingsData.map(m => ({
+      id: m.id, type: 'meeting', date: m.date, time: m.time,
+      title: m.title, address: m.address, assignee_id: m.assignee_id,
+      notes: m.notes, purpose: m.purpose,
+    }))
+    const fromCalEvents = calEventsData
+      .filter(ce => ce.event_type === 'meeting')
+      .map(ce => ({
+        id: ce.id, type: 'meeting', date: ce.event_date, time: ce.event_time,
+        title: ce.title, address: ce.address, assignee_id: ce.assigned_to,
+        notes: null, purpose: null,
+      }))
+    return [...fromMeetings, ...fromCalEvents]
+  })()
 
   function prev() {
     if (activeView === 'week') setViewDate(d => new Date(d.getTime() - 7 * 86400000))
@@ -922,11 +1508,28 @@ export default function Schedule() {
     setSelectedProject(null)
   }
 
+  function handleEventClick(event, rect) {
+    if (event.type === 'project') {
+      setSelectedProject(event)
+    } else {
+      setPopoverEvent(event)
+      setPopoverRect(rect)
+    }
+  }
+
+  // Type toggle config
+  const typeToggleConfig = [
+    { key: 'projects', label: 'Projects', color: '#3b82f6' },
+    { key: 'consults', label: 'Consults', color: '#7F77DD' },
+    { key: 'meetings', label: 'Meetings', color: '#1D9E75' },
+  ]
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden', background: 'var(--bg)' }}>
 
       {/* ── Header ───────────────────────────────────────────── */}
       <div style={{ padding: '14px 24px', borderBottom: '1px solid var(--line)', flexShrink: 0, background: 'var(--panel)' }}>
+        {/* Row 1: title + nav + view toggle + actions */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
           {/* Left: title + nav */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -980,6 +1583,14 @@ export default function Schedule() {
             </button>
 
             <button
+              onClick={() => setQuickAddDate('')}
+              style={{ background: 'linear-gradient(135deg,#1D9E75,#16a34a)', border: 'none', borderRadius: 8, padding: '7px 14px', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}
+            >
+              <Plus size={14} />
+              {!isMobile && 'Add Event'}
+            </button>
+
+            <button
               onClick={() => setShowNewMeeting(true)}
               style={{ background: 'linear-gradient(135deg,#1e3a5f,#2563eb)', border: 'none', borderRadius: 8, padding: '7px 14px', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}
             >
@@ -988,6 +1599,35 @@ export default function Schedule() {
             </button>
           </div>
         </div>
+
+        {/* Row 2: event type toggles */}
+        {activeView !== 'list' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
+            {typeToggleConfig.map(({ key, label, color }) => {
+              const active = showTypes[key]
+              return (
+                <button
+                  key={key}
+                  onClick={() => setShowTypes(prev => ({ ...prev, [key]: !prev[key] }))}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    background: active ? `rgba(${color === '#3b82f6' ? '59,130,246' : color === '#7F77DD' ? '127,119,221' : '29,158,117'},0.15)` : 'transparent',
+                    border: `1.5px solid ${active ? color : 'var(--line)'}`,
+                    borderRadius: 20,
+                    padding: '4px 12px',
+                    color: active ? color : 'var(--ink-3)',
+                    fontSize: 12, fontWeight: 600,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  <div style={{ width: 7, height: 7, borderRadius: '50%', background: active ? color : 'var(--ink-3)', flexShrink: 0 }} />
+                  {label}
+                </button>
+              )
+            })}
+          </div>
+        )}
 
         {unscheduled.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 7, padding: '7px 12px', marginTop: 10, fontSize: 12 }}>
@@ -1007,13 +1647,28 @@ export default function Schedule() {
           </div>
         ) : activeView === 'month' ? (
           <MonthView
-            projects={projects} viewDate={viewDate} todayStr={todayStr}
-            memberMap={memberMap} onProjectClick={setSelectedProject}
+            projects={projects}
+            consults={mergedConsults}
+            meetings={mergedMeetings}
+            viewDate={viewDate}
+            todayStr={todayStr}
+            memberMap={memberMap}
+            onProjectClick={setSelectedProject}
+            onEventClick={handleEventClick}
+            onDayCellClick={setQuickAddDate}
+            showTypes={showTypes}
           />
         ) : activeView === 'week' ? (
           <WeekView
-            projects={projects} viewDate={viewDate} todayStr={todayStr}
-            memberMap={memberMap} onProjectClick={setSelectedProject}
+            projects={projects}
+            consults={mergedConsults}
+            meetings={mergedMeetings}
+            viewDate={viewDate}
+            todayStr={todayStr}
+            memberMap={memberMap}
+            onProjectClick={setSelectedProject}
+            onEventClick={handleEventClick}
+            showTypes={showTypes}
           />
         ) : (
           <ListView projects={projects} memberMap={memberMap} onProjectClick={setSelectedProject} />
@@ -1024,8 +1679,12 @@ export default function Schedule() {
       {activeView !== 'list' && (
         <div style={{ padding: '8px 24px', borderTop: '1px solid var(--line)', display: 'flex', gap: 16, alignItems: 'center', flexShrink: 0, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#7c3aed' }} />
+            <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#7F77DD' }} />
             <span style={{ fontSize: 11, color: 'var(--ink-2)' }}>Consult</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#1D9E75' }} />
+            <span style={{ fontSize: 11, color: 'var(--ink-2)' }}>Meeting</span>
           </div>
           <div style={{ width: 1, height: 12, background: 'var(--line)' }} />
           {Object.entries(JOB_CHIP).map(([type, { accent }]) => (
@@ -1035,7 +1694,7 @@ export default function Schedule() {
             </div>
           ))}
           <span style={{ fontSize: 11, color: 'var(--ink-3)', marginLeft: 'auto' }}>
-            {scheduledProjects.length} project{scheduledProjects.length !== 1 ? 's' : ''} · {projects.filter(p => p.consult_at).length} consult{projects.filter(p => p.consult_at).length !== 1 ? 's' : ''}
+            {scheduledProjects.length} project{scheduledProjects.length !== 1 ? 's' : ''} · {mergedConsults.length} consult{mergedConsults.length !== 1 ? 's' : ''} · {mergedMeetings.length} meeting{mergedMeetings.length !== 1 ? 's' : ''}
           </span>
         </div>
       )}
@@ -1056,6 +1715,23 @@ export default function Schedule() {
       )}
       {showSync && (
         <CalendarSyncModal onClose={() => setShowSync(false)} />
+      )}
+      {quickAddDate !== null && (
+        <QuickAddEventModal
+          initialDate={quickAddDate}
+          leads={projects}
+          members={members}
+          onClose={() => setQuickAddDate(null)}
+          onSaved={() => { setQuickAddDate(null); fetchProjects() }}
+        />
+      )}
+      {popoverEvent && (
+        <EventPopover
+          event={popoverEvent}
+          anchorRect={popoverRect}
+          memberMap={memberMap}
+          onClose={() => { setPopoverEvent(null); setPopoverRect(null) }}
+        />
       )}
     </div>
   )
