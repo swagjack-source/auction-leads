@@ -3,7 +3,7 @@ import { Search, TrendingUp, AlertTriangle, Sparkles, Download, Upload, X, Arrow
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
 } from 'recharts'
-import supabase from '../lib/supabase'
+import { supabase } from '../lib/supabase'
 import CTBidsLiveTab from './CTBidsLiveTab'
 import CTBidsIntelligenceTab from './CTBidsIntelligenceTab'
 

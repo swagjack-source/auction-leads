@@ -3,7 +3,7 @@ import { CalendarDays } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
 } from 'recharts'
-import supabase from '../lib/supabase'
+import { supabase } from '../lib/supabase'
 
 export default function CTBidsLiveTab({ PROFIT_THRESHOLD, D, onSwitchTab }) {
   const [summary, setSummary] = useState(undefined) // undefined = loading, null = no data
