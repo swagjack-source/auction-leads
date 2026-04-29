@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import DOMPurify from 'dompurify'
 import { Plus, Search, BookOpen, Pencil, Trash2, X, ChevronLeft, Bold, Italic, List, Heading2, Clock } from 'lucide-react'
 import { supabase } from '../lib/supabase'
