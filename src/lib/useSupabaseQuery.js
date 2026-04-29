@@ -35,7 +35,7 @@ export function useSupabaseQuery(queryFn, deps = [], options = {}) {
     enabled = true,
   } = options
 
-  const [data,    setData]    = useState(null)
+  const [data,    setData]    = useState(undefined)
   const [loading, setLoading] = useState(enabled)
   const [error,   setError]   = useState(null)
 
