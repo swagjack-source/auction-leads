@@ -536,65 +536,210 @@ export default function Pipeline() {
   async function handleImportLeads(e) {
     const file = e.target.files?.[0]; if (!file) return; e.target.value = ''
     try {
-      let jsonRows = []
-      if (file.name.match(/\.(xlsx|xls)$/i)) {
-        const wb = XLSX.read(await file.arrayBuffer())
-        const ws = wb.Sheets[wb.SheetNames[0]]
-        jsonRows = XLSX.utils.sheet_to_json(ws, { defval: '' })
-      } else {
-        const lines = (await file.text()).trim().split('\n')
-        const headers = lines[0].split(',').map(h => h.trim())
-        jsonRows = lines.slice(1).map(line => {
-          const vals = line.split(',').map(v => v.trim().replace(/^"|"$/g, ''))
-          const row = {}; headers.forEach((h, i) => row[h] = vals[i] || ''); return row
-        })
-      }
-
-      // Normalise keys
-      const rows = jsonRows.map(r => {
-        const n = {}
-        Object.entries(r).forEach(([k, v]) => { n[k.toLowerCase().trim().replace(/\s+/g, '_')] = String(v).trim() })
-        return n
-      }).filter(r => r.name || r.client || r.full_name)
-
-      if (!rows.length) { alert('No importable rows found. Expected a "Name" column.'); return }
-
+      // ── Helpers ────────────────────────────────────────────
       const STATUS_MAP = {
         'new lead': 'New Lead', 'contacted': 'Contacted', 'in talks': 'In Talks',
         'consult scheduled': 'Consult Scheduled', 'consult completed': 'Consult Completed',
         'estimate sent': 'Estimate Sent', 'project accepted': 'Project Accepted',
-        'project scheduled': 'Project Scheduled', 'won': 'Won', 'lost': 'Lost',
+        'project scheduled': 'Project Scheduled', 'won': 'Won', 'lost': 'Lost', 'backlog': 'Backlog',
       }
       const VALID_STATUSES = new Set(Object.values(STATUS_MAP))
 
+      // Map free-form job-type strings (often comma-separated) to a single
+      // value the leads CHECK constraint accepts.
       function mapJobType(raw) {
         const s = String(raw || '').toLowerCase()
+        if (!s.trim()) return null
         const hasAuction = s.includes('auction')
-        const hasClean = s.includes('clean')
+        const hasClean   = s.includes('clean')
+        const hasMove    = s.includes('move') || s.includes('relocation')
+        const hasSort    = s.includes('sort') || s.includes('organiz')
         if (hasAuction && hasClean) return 'Both'
         if (hasAuction) return 'Auction'
-        if (hasClean) return 'Clean Out'
+        if (hasClean)   return 'Clean Out'
+        if (hasMove)    return 'Move'
+        if (hasSort)    return 'Sorting/Organizing'
         return null
       }
 
-      const toInsert = rows.map(r => {
-        const rawStatus = String(r.status || '').trim()
-        const mappedStatus = STATUS_MAP[rawStatus.toLowerCase()] || (VALID_STATUSES.has(rawStatus) ? rawStatus : 'New Lead')
-        return {
-          organization_id: organizationId,
-          name:    r.name || r.client || r.full_name,
-          phone:   r.phone || r.phone_number || r.cell || '',
-          email:   r.email || r.email_address || '',
-          address: r.address || '',
-          notes:   r.notes || r.what_they_need || r.description || '',
-          status:  mappedStatus,
-          job_type: mapJobType(r.job_type || r.type || r.services) || undefined,
+      // A "section divider" is a row where only the FIRST cell has content
+      // (e.g. "New Lead (4)" or "April 2026 (9 projects)"). Skip these.
+      function isSectionDivider(rowArr) {
+        const filled = rowArr.filter(c => String(c ?? '').trim() !== '').length
+        return filled <= 1
+      }
+
+      // Find the row index in `rows` whose contents look like real headers
+      // for the given expected column names. Returns -1 if none found.
+      function findHeaderRow(rows, expectedAny) {
+        const expectedLc = expectedAny.map(h => h.toLowerCase())
+        for (let i = 0; i < Math.min(rows.length, 5); i++) {
+          const cells = rows[i].map(c => String(c ?? '').toLowerCase().trim())
+          if (expectedLc.some(h => cells.includes(h))) return i
         }
-      })
+        return -1
+      }
+
+      // Build a {header_lc: value} record from a row given its header row
+      function rowToObj(headerRow, dataRow) {
+        const obj = {}
+        headerRow.forEach((h, i) => {
+          const key = String(h ?? '').toLowerCase().trim()
+          if (!key) return
+          obj[key] = dataRow[i] !== undefined ? dataRow[i] : ''
+        })
+        return obj
+      }
+
+      // Compose a valid YYYY-MM-DD date from "Month" + "Year" columns.
+      function monthYearToDate(month, year) {
+        if (!month || !year) return null
+        const idx = ['january','february','march','april','may','june','july','august','september','october','november','december']
+          .indexOf(String(month).toLowerCase().trim())
+        if (idx < 0) return null
+        const m = String(idx + 1).padStart(2, '0')
+        return `${year}-${m}-15`
+      }
+
+      function toNumber(v) {
+        if (v === '' || v == null) return null
+        const n = Number(String(v).replace(/[$,]/g, ''))
+        return Number.isFinite(n) ? n : null
+      }
+
+      // ── Read all sheets ────────────────────────────────────
+      let sheets = []
+      if (file.name.match(/\.(xlsx|xls)$/i)) {
+        const wb = XLSX.read(await file.arrayBuffer())
+        sheets = wb.SheetNames.map(name => ({
+          name,
+          rows: XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: '' }),
+        }))
+      } else {
+        const text = await file.text()
+        const lines = text.trim().split(/\r?\n/)
+        const rows = lines.map(line => {
+          // Naive CSV split — handles unquoted commas only. Good enough
+          // for the existing CSV template; xlsx is the recommended path.
+          return line.split(',').map(v => v.trim().replace(/^"|"$/g, ''))
+        })
+        sheets = [{ name: 'csv', rows }]
+      }
+
+      // ── Classify each sheet + extract data rows ────────────
+      const PIPELINE_HEADERS  = ['name','client','phone','email','status']
+      const PROJECT_HEADERS   = ['client','revenue','labour cost','net profit','bid high','bid low']
+
+      const pipelineLeads = []
+      const completedProjects = []
+
+      for (const sheet of sheets) {
+        if (sheet.rows.length < 2) continue
+
+        const hdrIdx = findHeaderRow(sheet.rows, [...PIPELINE_HEADERS, ...PROJECT_HEADERS])
+        if (hdrIdx < 0) continue
+
+        const headerRow = sheet.rows[hdrIdx]
+        const headerLc  = headerRow.map(h => String(h ?? '').toLowerCase().trim())
+        const isProjects = headerLc.includes('client') &&
+          (headerLc.includes('revenue') || headerLc.includes('labour cost') || headerLc.includes('net profit'))
+        const isPipeline = headerLc.includes('name') && headerLc.includes('status')
+
+        if (!isProjects && !isPipeline) continue
+
+        for (let i = hdrIdx + 1; i < sheet.rows.length; i++) {
+          const r = sheet.rows[i]
+          if (isSectionDivider(r)) continue
+          const obj = rowToObj(headerRow, r)
+          if (isProjects) completedProjects.push(obj)
+          else            pipelineLeads.push(obj)
+        }
+      }
+
+      const totalRows = pipelineLeads.length + completedProjects.length
+      if (totalRows === 0) {
+        alert('No importable rows found. Expected a header row with "Name" or "Client".')
+        return
+      }
+
+      // ── Build inserts ─────────────────────────────────────
+      const toInsert = []
+
+      // Active pipeline leads
+      for (const r of pipelineLeads) {
+        const name = String(r.name || r.client || '').trim()
+        if (!name) continue
+        const rawStatus = String(r.status || '').trim()
+        const mapped = STATUS_MAP[rawStatus.toLowerCase()] ||
+                       (VALID_STATUSES.has(rawStatus) ? rawStatus : 'New Lead')
+        const job = mapJobType(r['job type'] || r.type || r.services)
+        const notesParts = []
+        if (r['what they need']) notesParts.push(String(r['what they need']))
+        if (r.notes)             notesParts.push(String(r.notes))
+        const originalJobType = String(r['job type'] || '').trim()
+        if (originalJobType && originalJobType !== job) {
+          notesParts.push(`(Original job type: ${originalJobType})`)
+        }
+        toInsert.push({
+          organization_id: organizationId,
+          name,
+          phone:     String(r.phone || '').trim() || null,
+          email:     String(r.email || '').trim() || null,
+          address:   String(r.address || '').trim() || null,
+          notes:     notesParts.filter(Boolean).join('\n\n') || null,
+          status:    mapped,
+          job_type:  job || 'Unknown',
+        })
+      }
+
+      // Completed projects → Won leads with P&L
+      for (const r of completedProjects) {
+        const name = String(r.client || r.name || '').trim()
+        if (!name) continue
+        const projectDate = monthYearToDate(r.month, r.year)
+        const job = mapJobType(r['job type'] || r.type)
+        const revenue = toNumber(r.revenue) ?? toNumber(r['bid high']) ?? toNumber(r['bid low'])
+        const labourCost = toNumber(r['labour cost']) ?? toNumber(r['labor cost'])
+        const expenses = toNumber(r.expenses)
+        const royalties = toNumber(r.royalties)
+        const deposit = toNumber(r.deposit)
+        const auctionRev = toNumber(r['auction revenue'])
+        const labourHrs = toNumber(r['labour hours']) ?? toNumber(r['labor hours'])
+        const netProfit = toNumber(r['net profit'])
+        const noteLines = []
+        if (auctionRev) noteLines.push(`Auction revenue: $${auctionRev.toLocaleString()}`)
+        if (labourHrs)  noteLines.push(`Labour hours: ${labourHrs}`)
+        if (netProfit != null) noteLines.push(`Reported net profit: $${netProfit.toLocaleString()}`)
+        const originalJobType = String(r['job type'] || '').trim()
+        if (originalJobType && originalJobType !== job) {
+          noteLines.push(`Original job type: ${originalJobType}`)
+        }
+        toInsert.push({
+          organization_id:    organizationId,
+          name,
+          address:            String(r.address || '').trim() || null,
+          status:             'Won',
+          job_type:           job || 'Unknown',
+          notes:              noteLines.length ? noteLines.join('\n') : null,
+          project_start:      projectDate,
+          project_end:        projectDate,
+          bid_amount:         revenue,
+          actual_labour_cost: labourCost,
+          actual_expenses:    expenses,
+          actual_royalties:   royalties,
+          deposit_received:   deposit,
+        })
+      }
+
+      if (toInsert.length === 0) {
+        alert('Detected sheets but no importable rows. Every row was missing a name or client.')
+        return
+      }
 
       const { error } = await supabase.from('leads').insert(toInsert)
       if (error) { alert(`Import failed: ${error.message}`); return }
-      alert(`Imported ${toInsert.length} lead${toInsert.length !== 1 ? 's' : ''} successfully.`)
+      const lp = pipelineLeads.length, cp = completedProjects.length
+      alert(`Imported ${toInsert.length} record${toInsert.length !== 1 ? 's' : ''} (${lp} pipeline lead${lp !== 1 ? 's' : ''}, ${cp} completed project${cp !== 1 ? 's' : ''}).`)
       fetchLeads()
     } catch (err) {
       alert(`Failed to read file: ${err.message}`)
