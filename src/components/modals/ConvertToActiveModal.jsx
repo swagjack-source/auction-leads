@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { X, CalendarDays, Users } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { estimateLabourHours } from '../../lib/scoring'
+import { getChecklistForType } from '../../lib/checklists'
 import logger from '../../lib/logger'
 
 function addWorkdays(startDateStr, days) {
@@ -14,30 +15,26 @@ function addWorkdays(startDateStr, days) {
   return d.toISOString().slice(0, 10)
 }
 
-export default function ScheduleProjectModal({ lead, onClose, onScheduled }) {
-  const [startDate, setStartDate]   = useState('')
-  const [employees, setEmployees]   = useState([])
+export default function ConvertToActiveModal({ project, onClose, onConverted }) {
+  const [startDate, setStartDate]       = useState('')
+  const [employees, setEmployees]       = useState([])
   const [teamFallback, setTeamFallback] = useState(false)
-  const [checked, setChecked]       = useState({})
-  const [saving, setSaving]         = useState(false)
-  const [error, setError]           = useState(null)
-  const [toast, setToast]           = useState(false)
+  const [checked, setChecked]           = useState({})
+  const [saving, setSaving]             = useState(false)
+  const [error, setError]               = useState(null)
 
-  const labourHours = lead._scoreDetails?.labourHours
-    ?? estimateLabourHours(lead.square_footage || 1500, lead.density || 'Medium')
+  const labourHours = project._scoreDetails?.labourHours
+    ?? estimateLabourHours(project.square_footage || 1500, project.density || 'Medium')
   const durationDays = Math.max(1, Math.ceil(labourHours / 8))
   const endDate = startDate ? addWorkdays(startDate, durationDays) : ''
 
   useEffect(() => {
     let cancelled = false
-    async function loadEmployees() {
-      // Try job-type-matched team first via project_types → employee_project_types
-      if (lead.job_type) {
+    async function load() {
+      // Try job-type-matched team first
+      if (project.job_type) {
         const { data: typeRow } = await supabase
-          .from('project_types')
-          .select('id')
-          .eq('name', lead.job_type)
-          .maybeSingle()
+          .from('project_types').select('id').eq('name', project.job_type).maybeSingle()
         if (typeRow?.id) {
           const { data: matched } = await supabase
             .from('employee_project_types')
@@ -54,16 +51,12 @@ export default function ScheduleProjectModal({ lead, onClose, onScheduled }) {
           }
         }
       }
-
       // Fallback: all active employees
       const { data, error: empErr } = await supabase
-        .from('employees')
-        .select('id, name, role, active')
-        .eq('active', true)
-        .order('name')
+        .from('employees').select('id, name, role, active').eq('active', true).order('name')
       if (cancelled) return
       if (empErr) {
-        logger.error('Load employees failed', empErr)
+        logger.error('ConvertToActive load employees failed', empErr)
         setEmployees([])
         return
       }
@@ -72,76 +65,98 @@ export default function ScheduleProjectModal({ lead, onClose, onScheduled }) {
       setChecked(Object.fromEntries(emps.map(e => [e.id, true])))
       setTeamFallback(true)
     }
-    loadEmployees()
+    load()
     return () => { cancelled = true }
-  }, [lead.job_type])
+  }, [project.job_type])
 
-  async function handleSchedule() {
+  async function handleConfirm() {
     if (!startDate) { setError('Please select a start date'); return }
     setSaving(true)
     setError(null)
 
-    const assignedIds = Object.entries(checked).filter(([, v]) => v).map(([id]) => id)
+    try {
+      const assignedIds = Object.entries(checked).filter(([, v]) => v).map(([id]) => id)
 
-    const { error: schedErr } = await supabase.from('scheduled_projects').insert({
-      lead_id:      lead.id,
-      start_date:   startDate,
-      end_date:     endDate || startDate,
-      labour_hours: labourHours,
-      job_type:     lead.job_type,
-    })
-    if (schedErr) {
-      logger.error('scheduled_projects insert failed', schedErr)
-      setError(schedErr.message)
+      // Generate checklist if the lead doesn't have one yet
+      const existingChecklist = Array.isArray(project.checklist) && project.checklist.length > 0
+        ? project.checklist
+        : null
+      const checklist = existingChecklist || getChecklistForType(project.job_type)
+
+      // 1. Update lead row
+      const { error: leadErr } = await supabase.from('leads').update({
+        status:        'Project Scheduled',
+        project_start: startDate,
+        project_end:   endDate || startDate,
+        checklist,
+      }).eq('id', project.id)
+      if (leadErr) {
+        logger.error('ConvertToActive lead update failed', leadErr)
+        setError(leadErr.message)
+        setSaving(false)
+        return
+      }
+
+      // 2. Insert scheduled_projects row
+      const { error: schedErr } = await supabase.from('scheduled_projects').insert({
+        lead_id:      project.id,
+        start_date:   startDate,
+        end_date:     endDate || startDate,
+        labour_hours: labourHours,
+        job_type:     project.job_type,
+      })
+      if (schedErr) {
+        logger.error('ConvertToActive scheduled_projects insert failed', schedErr)
+        // Non-fatal: lead is already updated. Surface as warning only.
+      }
+
+      // 3. Insert project_assignments per checked employee
+      if (assignedIds.length > 0) {
+        const rows = assignedIds.map(employee_id => ({
+          lead_id: project.id,
+          employee_id,
+          estimated_hours: labourHours / Math.max(1, assignedIds.length),
+        }))
+        const { error: paErr } = await supabase.from('project_assignments').insert(rows)
+        if (paErr) logger.error('ConvertToActive project_assignments insert failed', paErr)
+      }
+
+      onConverted?.({
+        ...project,
+        status: 'Project Scheduled',
+        project_start: startDate,
+        project_end: endDate || startDate,
+        checklist,
+      })
+    } catch (e) {
+      logger.error('ConvertToActive threw', e)
+      setError(e?.message || 'Failed to convert project.')
       setSaving(false)
-      return
     }
-
-    // Insert project_assignments for each checked employee
-    if (assignedIds.length > 0) {
-      const rows = assignedIds.map(employee_id => ({
-        lead_id: lead.id,
-        employee_id,
-        estimated_hours: labourHours / Math.max(1, assignedIds.length),
-      }))
-      const { error: paErr } = await supabase.from('project_assignments').insert(rows)
-      if (paErr) logger.error('project_assignments insert failed', paErr)
-    }
-
-    // Also update lead with project dates so Schedule page picks it up
-    await supabase.from('leads').update({
-      project_start: startDate,
-      project_end:   endDate || startDate,
-    }).eq('id', lead.id)
-
-    onScheduled('Project Scheduled')
-    setToast(true)
   }
 
   return (
     <div
-      style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'var(--overlay-heavy)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+      style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'var(--overlay-heavy)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div style={{ background: 'var(--panel)', borderRadius: 16, width: '100%', maxWidth: 500, boxShadow: '0 24px 70px rgba(20,22,26,0.28)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ background: 'var(--panel)', borderRadius: 16, width: '100%', maxWidth: 520, boxShadow: 'var(--shadow-lg)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
         {/* Header */}
         <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <CalendarDays size={16} color="var(--accent)" />
-            <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--ink-1)' }}>Add to Schedule</span>
+            <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--ink-1)' }}>Convert to Active</span>
           </div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-3)', display: 'grid', placeItems: 'center' }}><X size={16} /></button>
         </div>
 
-        {/* Body */}
-        <div style={{ padding: '20px', overflowY: 'auto', maxHeight: 500 }}>
-
-          {/* Project info */}
+        <div style={{ padding: '20px', overflowY: 'auto', maxHeight: 540 }}>
+          {/* Project summary */}
           <div style={{ background: 'var(--bg)', borderRadius: 10, padding: '12px 14px', marginBottom: 18 }}>
-            <div style={{ fontWeight: 600, fontSize: 13.5, color: 'var(--ink-1)', marginBottom: 3 }}>{lead.name}</div>
-            {lead.address && <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 2 }}>{lead.address}</div>}
-            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent-ink)', background: 'var(--accent-soft)', padding: '2px 8px', borderRadius: 999 }}>{lead.job_type}</span>
+            <div style={{ fontWeight: 600, fontSize: 13.5, color: 'var(--ink-1)', marginBottom: 3 }}>{project.name}</div>
+            {project.address && <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 4 }}>{project.address}</div>}
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent-ink)', background: 'var(--accent-soft)', padding: '2px 8px', borderRadius: 999 }}>{project.job_type}</span>
           </div>
 
           {/* Date + duration */}
@@ -170,9 +185,9 @@ export default function ScheduleProjectModal({ lead, onClose, onScheduled }) {
               <Users size={13} color="var(--ink-3)" />
               <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Team</span>
             </div>
-            {teamFallback && lead.job_type && employees.length > 0 && (
+            {teamFallback && project.job_type && employees.length > 0 && (
               <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginBottom: 8, fontStyle: 'italic' }}>
-                No team set up for {lead.job_type} — showing all active employees.
+                No team set up for {project.job_type} — showing all active employees.
               </div>
             )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
@@ -187,7 +202,7 @@ export default function ScheduleProjectModal({ lead, onClose, onScheduled }) {
                     onChange={e => setChecked(c => ({ ...c, [emp.id]: e.target.checked }))}
                     style={{ width: 15, height: 15, accentColor: 'var(--accent)', flexShrink: 0 }}
                   />
-                  <div>
+                  <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink-1)' }}>{emp.name}</div>
                     {emp.role && <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>{emp.role}</div>}
                   </div>
@@ -201,21 +216,14 @@ export default function ScheduleProjectModal({ lead, onClose, onScheduled }) {
 
         {/* Footer */}
         <div style={{ padding: '12px 20px', borderTop: '1px solid var(--line)', display: 'flex', gap: 8, justifyContent: 'flex-end', background: 'var(--bg-2)' }}>
-          <button onClick={onClose} style={{ padding: '9px 18px', borderRadius: 9, border: '1px solid var(--line)', background: 'var(--panel)', color: 'var(--ink-2)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+          <button onClick={onClose} disabled={saving} style={{ padding: '9px 18px', borderRadius: 9, border: '1px solid var(--line)', background: 'var(--panel)', color: 'var(--ink-2)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
             Cancel
           </button>
-          <button onClick={handleSchedule} disabled={saving || !startDate} style={{ padding: '9px 20px', borderRadius: 9, border: 'none', background: saving || !startDate ? 'var(--line)' : 'var(--accent)', color: saving || !startDate ? 'var(--ink-3)' : 'white', fontSize: 13, fontWeight: 600, cursor: saving || !startDate ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <CalendarDays size={13} /> {saving ? 'Scheduling…' : 'Schedule Project'}
+          <button onClick={handleConfirm} disabled={saving || !startDate} style={{ padding: '9px 20px', borderRadius: 9, border: 'none', background: saving || !startDate ? 'var(--line)' : 'var(--accent)', color: saving || !startDate ? 'var(--ink-3)' : '#FFFFFF', fontSize: 13, fontWeight: 600, cursor: saving || !startDate ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <CalendarDays size={13} /> {saving ? 'Converting…' : 'Convert to Active'}
           </button>
         </div>
       </div>
-
-      {/* Toast */}
-      {toast && (
-        <div style={{ position: 'fixed', bottom: 28, left: '50%', transform: 'translateX(-50%)', background: 'var(--ink-1)', color: 'var(--bg)', padding: '10px 20px', borderRadius: 10, fontSize: 13, fontWeight: 500, zIndex: 999, whiteSpace: 'nowrap', boxShadow: '0 4px 20px rgba(0,0,0,0.3)' }}>
-          ✓ Project added to schedule
-        </div>
-      )}
     </div>
   )
 }

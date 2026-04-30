@@ -1,987 +1,934 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import {
-  X, Phone, FileText, Image, File, Download, Trash2,
-  Upload, Plus, Star, Copy, Check,
+  X, MapPin, MoreHorizontal, Pencil, CheckCircle, Trash2,
+  Users, Plus, Star, Image as ImageIcon, FileText,
+  CheckSquare, Square,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../lib/AuthContext'
-import { useTeam } from '../../lib/TeamContext'
-
-// ── Constants ─────────────────────────────────────────────────
+import { getChecklistForType, checklistProgress } from '../../lib/checklists'
+import logger from '../../lib/logger'
+import ConvertToActiveModal from './ConvertToActiveModal'
+import MarkCompleteModal from './MarkCompleteModal'
 
 const JOB_CHIP = {
-  'Clean Out':     { bg: 'rgba(234,88,12,0.2)',  accent: '#ea580c' },
-  'Auction':       { bg: 'rgba(124,58,237,0.2)', accent: '#7c3aed' },
-  'Both':          { bg: 'rgba(59,130,246,0.2)', accent: '#3b82f6' },
-  'In-Person Sale':{ bg: 'rgba(234,179,8,0.2)',  accent: '#ca8a04' },
+  'Clean Out':            { bg: 'rgba(234,88,12,0.18)',  fg: '#ea580c' },
+  'Auction':              { bg: 'rgba(124,58,237,0.18)', fg: '#7c3aed' },
+  'Both':                 { bg: 'rgba(59,130,246,0.18)', fg: '#3b82f6' },
+  'Move':                 { bg: 'rgba(20,184,166,0.18)', fg: '#0d9488' },
+  'Sorting/Organizing':   { bg: 'rgba(168,85,247,0.18)', fg: '#a855f7' },
+  'In-person Estate Sale':{ bg: 'rgba(234,179,8,0.18)',  fg: '#ca8a04' },
 }
-
-const SENTIMENTS = [
-  { key: 'tough',  label: '😤 Tough' },
-  { key: 'okay',   label: '😊 Okay' },
-  { key: 'happy',  label: '😄 Happy' },
-  { key: 'raving', label: '🤩 Raving' },
-]
 
 const AVATAR_COLORS = ['#ef4444','#f97316','#eab308','#22c55e','#3b82f6','#8b5cf6','#ec4899','#14b8a6']
 
-// ── Tiny helpers ──────────────────────────────────────────────
+const CLOUD_NAME    = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME    || 'du5jkfzkf'
+const UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || 'ct_listings'
+
+// ── Helpers ────────────────────────────────────────────────────
 
 function avatarColor(name = '') {
-  return AVATAR_COLORS[name.charCodeAt(0) % AVATAR_COLORS.length]
+  return AVATAR_COLORS[(name.charCodeAt(0) || 0) % AVATAR_COLORS.length]
 }
 function initials(name = '') {
-  return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+  return name.split(' ').map(n => n[0]).filter(Boolean).join('').toUpperCase().slice(0, 2)
 }
-function fmt$(n) { return n ? `$${Math.round(n).toLocaleString()}` : '—' }
-function fmtBytes(b) {
-  if (!b) return ''
-  if (b < 1024) return `${b} B`
-  if (b < 1048576) return `${(b/1024).toFixed(1)} KB`
-  return `${(b/1048576).toFixed(1)} MB`
+function fmt$(n) {
+  if (n == null || n === '') return ''
+  const num = Number(n)
+  if (Number.isNaN(num)) return ''
+  return num.toLocaleString(undefined, { maximumFractionDigits: 2 })
 }
-function fmtDate(iso) {
+function relTime(iso) {
   if (!iso) return ''
-  return new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric' })
+  const ms = Date.now() - new Date(iso).getTime()
+  const m = Math.floor(ms / 60000)
+  if (m < 1) return 'just now'
+  if (m < 60) return `${m}m ago`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ago`
+  const d = Math.floor(h / 24)
+  if (d < 7) return `${d}d ago`
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
-function relDate(iso) {
-  if (!iso) return ''
-  const diff = Date.now() - new Date(iso).getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'Just now'
-  if (mins < 60) return `${mins}m ago`
-  const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return `Today · ${new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
-  if (hrs < 48) return 'Yesterday'
-  return fmtDate(iso)
+function shortDate(d) {
+  if (!d) return ''
+  return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+function startOfDay(d) {
+  const x = new Date(d)
+  x.setHours(0, 0, 0, 0)
+  return x
+}
+function addWorkdays(startDateStr, days) {
+  const d = new Date(startDateStr + 'T00:00:00')
+  let added = 0
+  while (added < days - 1) {
+    d.setDate(d.getDate() + 1)
+    if (d.getDay() !== 0 && d.getDay() !== 6) added++
+  }
+  return d.toISOString().slice(0, 10)
 }
 
-// ── Shared sub-components ─────────────────────────────────────
+function timelineState(project) {
+  const start = project.project_start ? startOfDay(project.project_start) : null
+  const end   = project.project_end   ? startOfDay(project.project_end)   : null
+  const today = startOfDay(new Date())
+  if (project.status === 'Won' || project.status === 'Project Completed') {
+    return { kind: 'completed', label: 'Completed', start, end, today }
+  }
+  if (!start || !end) return { kind: 'unscheduled', label: 'Not scheduled', start, end, today }
+  if (today < start) {
+    const days = Math.ceil((start - today) / 86400000)
+    return { kind: 'upcoming', label: `Starts in ${days} day${days === 1 ? '' : 's'}`, start, end, today, days }
+  }
+  if (today > end) {
+    const days = Math.ceil((today - end) / 86400000)
+    return { kind: 'overdue', label: `Overdue by ${days} day${days === 1 ? '' : 's'}`, start, end, today, days }
+  }
+  const totalDays = Math.max(1, Math.round((end - start) / 86400000) + 1)
+  const dayN = Math.round((today - start) / 86400000) + 1
+  return { kind: 'active', label: `Day ${dayN} of ${totalDays}`, start, end, today, dayN, totalDays }
+}
 
-function StatBox({ label, value, sub, color }) {
+// ── Section wrapper ───────────────────────────────────────────
+
+function SectionTitle({ children, right }) {
   return (
-    <div style={{ flex: 1, minWidth: 0, background: 'var(--bg-2)', borderRadius: 8, padding: '10px 12px' }}>
-      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>{label}</div>
-      <div style={{ fontSize: 16, fontWeight: 700, color: color || 'var(--ink-1)', letterSpacing: '-0.01em' }}>{value || '—'}</div>
-      {sub && <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 1 }}>{sub}</div>}
-    </div>
-  )
-}
-
-function MetricPair({ a, b }) {
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
-      <div>
-        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{a.label}</div>
-        <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink-1)', marginTop: 2 }}>{a.value ?? '—'}</div>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+      <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+        {children}
       </div>
-      <div>
-        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{b.label}</div>
-        <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink-1)', marginTop: 2 }}>{b.value ?? '—'}</div>
+      {right}
+    </div>
+  )
+}
+
+function Section({ children, style }) {
+  return <div style={{ marginBottom: 22, ...style }}>{children}</div>
+}
+
+// ── 1. Header ────────────────────────────────────────────────
+
+function HeaderSection({ project, timeline, onEdit, onMarkComplete, onDelete, onClose }) {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const menuRef = useRef(null)
+
+  useEffect(() => {
+    if (!menuOpen) return
+    function onClick(e) {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [menuOpen])
+
+  const chip = JOB_CHIP[project.job_type] || { bg: 'var(--bg-2)', fg: 'var(--ink-2)' }
+  const mapsUrl = project.address
+    ? `https://maps.google.com/?q=${encodeURIComponent(project.address)}`
+    : null
+
+  const tlColor =
+    timeline.kind === 'completed' ? 'var(--win)'
+    : timeline.kind === 'overdue' ? 'var(--lose)'
+    : timeline.kind === 'active'  ? 'var(--accent)'
+    : timeline.kind === 'upcoming' ? 'var(--warn)'
+    : 'var(--ink-3)'
+  const tlBg = `color-mix(in oklab, ${tlColor} 14%, var(--panel))`
+
+  return (
+    <div style={{ padding: '16px 18px 14px', borderBottom: '1px solid var(--line)', flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 11, fontWeight: 700, background: chip.bg, color: chip.fg, padding: '2px 8px', borderRadius: 5 }}>
+              {project.job_type || 'Untitled'}
+            </span>
+            <span style={{ fontSize: 11, fontWeight: 600, color: tlColor, background: tlBg, padding: '2px 8px', borderRadius: 999 }}>
+              {timeline.label}
+            </span>
+          </div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--ink-1)', letterSpacing: '-0.02em' }}>{project.name}</div>
+          {project.address && (
+            <a href={mapsUrl} target="_blank" rel="noopener noreferrer"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 4, fontSize: 12.5, color: 'var(--ink-3)', textDecoration: 'none' }}
+              onMouseEnter={e => e.currentTarget.style.color = 'var(--accent)'}
+              onMouseLeave={e => e.currentTarget.style.color = 'var(--ink-3)'}
+            >
+              <MapPin size={12} strokeWidth={1.8} />
+              <span>{project.address}</span>
+            </a>
+          )}
+        </div>
+        <div style={{ position: 'relative', display: 'flex', gap: 4 }} ref={menuRef}>
+          <button onClick={() => setMenuOpen(s => !s)} style={iconBtn} title="More" aria-label="More actions">
+            <MoreHorizontal size={16} />
+          </button>
+          <button onClick={onClose} style={iconBtn} title="Close" aria-label="Close">
+            <X size={16} />
+          </button>
+          {menuOpen && (
+            <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 6, zIndex: 80, background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, boxShadow: 'var(--shadow-2)', minWidth: 180, overflow: 'hidden' }}>
+              <MenuItem icon={Pencil} label="Edit Details" onClick={() => { setMenuOpen(false); onEdit() }} />
+              {timeline.kind !== 'completed' && (
+                <MenuItem icon={CheckCircle} label="Mark Complete" onClick={() => { setMenuOpen(false); onMarkComplete() }} />
+              )}
+              <MenuItem icon={Trash2} danger label="Delete Project" onClick={() => { setMenuOpen(false); setConfirmDelete(true) }} />
+            </div>
+          )}
+        </div>
       </div>
+
+      {confirmDelete && (
+        <div style={{ marginTop: 12, padding: '10px 12px', background: 'var(--lose-soft)', border: '1px solid color-mix(in oklab, var(--lose) 25%, var(--line))', borderRadius: 9, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ flex: 1, fontSize: 12.5, color: 'var(--lose)' }}>Delete this project? This cannot be undone.</span>
+          <button onClick={() => setConfirmDelete(false)} style={{ ...secondaryBtn, padding: '5px 10px' }}>Cancel</button>
+          <button onClick={() => { setConfirmDelete(false); onDelete(project.id) }} style={{ ...primaryBtn, background: 'var(--lose)', padding: '5px 10px' }}>Delete</button>
+        </div>
+      )}
     </div>
   )
 }
 
-function Section({ label, children, style }) {
+function MenuItem({ icon: Icon, label, onClick, danger }) {
   return (
-    <div style={{ marginBottom: 20, ...style }}>
-      <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>{label}</div>
-      {children}
-    </div>
-  )
-}
-
-function Avatar({ name, size = 28 }) {
-  const color = avatarColor(name)
-  return (
-    <div style={{ width: size, height: size, borderRadius: '50%', background: color, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: Math.floor(size * 0.38), fontWeight: 700, border: '2px solid var(--panel)', flexShrink: 0 }}>
-      {initials(name)}
-    </div>
-  )
-}
-
-function QuickLogButton({ label, onLog }) {
-  return (
-    <button onClick={() => onLog(label)} style={{
-      background: 'var(--bg-2)', border: '1px solid var(--line)', borderRadius: 9,
-      padding: '10px 12px', textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit',
-      display: 'flex', flexDirection: 'column', gap: 2,
-    }}>
-      <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent-ink)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>+ LOG</span>
-      <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink-1)' }}>{label}</span>
+    <button
+      onClick={onClick}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+        padding: '8px 12px', border: 'none', background: 'transparent',
+        color: danger ? 'var(--lose)' : 'var(--ink-1)',
+        fontSize: 13, fontWeight: 500, cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit',
+      }}
+      onMouseEnter={e => e.currentTarget.style.background = danger ? 'var(--lose-soft)' : 'var(--hover)'}
+      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+    >
+      <Icon size={14} strokeWidth={1.8} />
+      {label}
     </button>
   )
 }
 
-function FileIcon({ name = '' }) {
-  const ext = name.split('.').pop().toLowerCase()
-  if (['jpg','jpeg','png','gif','webp','heic'].includes(ext)) return <Image size={14} />
-  if (ext === 'pdf') return <FileText size={14} />
-  return <File size={14} />
-}
+// ── 2. Timeline ──────────────────────────────────────────────
 
-// ── OVERVIEW TAB ─────────────────────────────────────────────
+function TimelineSection({ project, timeline, onUpdate }) {
+  const [editing, setEditing] = useState(false)
+  const [start, setStart] = useState('')
+  const [days, setDays] = useState(3)
 
-function OverviewTab({ project, members, isCompleted, logs, onLog, onAssign }) {
-  const d = project._scoreDetails || {}
-  const assignedMember = members.find(m => m.id === project.assigned_to)
-  const [showAssignMenu, setShowAssignMenu] = useState(false)
-  const assignRef = useRef(null)
-
-  useEffect(() => {
-    if (!showAssignMenu) return
-    function handle(e) { if (assignRef.current && !assignRef.current.contains(e.target)) setShowAssignMenu(false) }
-    document.addEventListener('mousedown', handle)
-    return () => document.removeEventListener('mousedown', handle)
-  }, [showAssignMenu])
-
-  return (
-    <div>
-      <Section label="Project Metrics">
-        {isCompleted ? (
-          <>
-            <MetricPair
-              a={{ label: 'Days on Site', value: project.project_start && project.project_end
-                ? Math.round((new Date(project.project_end) - new Date(project.project_start)) / 86400000) + 1
-                : d.projectDays ?? '—' }}
-              b={{ label: 'Lot Count', value: '—' }}
-            />
-            <MetricPair
-              a={{ label: 'Labor Hrs', value: d.labourHours ? Math.round(d.labourHours) : '—' }}
-              b={{ label: 'Dumpster Fees', value: '—' }}
-            />
-          </>
-        ) : (
-          <>
-            <MetricPair
-              a={{ label: 'Setup Days', value: d.projectDays ?? '—' }}
-              b={{ label: 'Labor Hrs', value: d.labourHours ? Math.round(d.labourHours) : '—' }}
-            />
-            <MetricPair
-              a={{ label: 'Crew Size', value: project.crew_size || d.crewSize || '—' }}
-              b={{ label: 'Rec. Bid', value: d.recommendedBid ? fmt$(d.recommendedBid) : '—' }}
-            />
-          </>
-        )}
-      </Section>
-
-      <Section label="Client">
-        <MetricPair
-          a={{ label: 'Primary', value: project.name }}
-          b={{ label: 'Phone', value: project.phone || '—' }}
-        />
-        <MetricPair
-          a={{ label: 'Email', value: project.email || '—' }}
-          b={{ label: 'Referred By', value: project.lead_source || '—' }}
-        />
-      </Section>
-
-      <Section label="Crew">
-        <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 6 }} ref={assignRef}>
-          {assignedMember ? (
-            <Avatar name={assignedMember.name} size={30} />
-          ) : (
-            <div style={{ width: 30, height: 30, borderRadius: '50%', background: 'var(--bg-2)', border: '2px dashed var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Plus size={12} color="var(--ink-3)" />
-            </div>
-          )}
-          <button
-            onClick={() => setShowAssignMenu(s => !s)}
-            style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent-ink)', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px', borderRadius: 6 }}
-          >
-            {assignedMember ? `${assignedMember.name} ▾` : '+ Assign'}
-          </button>
-          {showAssignMenu && (
-            <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 100, background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, boxShadow: '0 4px 20px rgba(0,0,0,0.15)', minWidth: 180, overflow: 'hidden', marginTop: 4 }}>
-              {members.length === 0 && (
-                <div style={{ padding: '10px 12px', fontSize: 12, color: 'var(--ink-3)' }}>No team members yet. Add via Calendar → Manage Team.</div>
-              )}
-              {members.map(m => (
-                <button key={m.id} onClick={() => { onAssign(m.id); setShowAssignMenu(false) }} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 12px', border: 'none', background: project.assigned_to === m.id ? 'var(--accent-soft)' : 'transparent', color: project.assigned_to === m.id ? 'var(--accent-ink)' : 'var(--ink-1)', fontSize: 12.5, cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit' }}>
-                  <div style={{ width: 20, height: 20, borderRadius: '50%', background: m.color || avatarColor(m.name), color: 'white', display: 'grid', placeItems: 'center', fontSize: 9, fontWeight: 700, flexShrink: 0 }}>{(m.initials || m.name?.[0] || '?').toUpperCase()}</div>
-                  {m.name}
-                </button>
-              ))}
-              {assignedMember && (
-                <button onClick={() => { onAssign(null); setShowAssignMenu(false) }} style={{ display: 'block', width: '100%', padding: '8px 12px', border: 'none', borderTop: '1px solid var(--line)', background: 'transparent', color: 'var(--ink-3)', fontSize: 12, cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit' }}>Remove assignee</button>
-              )}
-            </div>
-          )}
+  if (timeline.kind === 'unscheduled' && !editing) {
+    return (
+      <Section>
+        <SectionTitle>Timeline</SectionTitle>
+        <div style={{ background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 10, padding: '14px', textAlign: 'center' }}>
+          <div style={{ fontSize: 13, color: 'var(--ink-3)', marginBottom: 10 }}>No dates set</div>
+          <button onClick={() => setEditing(true)} style={primaryBtn}>Set Dates</button>
         </div>
       </Section>
+    )
+  }
 
-      {!isCompleted && (
-        <Section label="Quick Updates">
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            <QuickLogButton label="Labor hours"   onLog={onLog} />
-            <QuickLogButton label="Supplies spent" onLog={onLog} />
-            <QuickLogButton label="Dumpster fee"   onLog={onLog} />
-            <QuickLogButton label="Notes"          onLog={onLog} />
+  if (editing) {
+    const calcEnd = start ? addWorkdays(start, Math.max(1, Number(days) || 1)) : ''
+    return (
+      <Section>
+        <SectionTitle>Timeline</SectionTitle>
+        <div style={{ background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 10, padding: '14px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <div>
+            <div style={fieldLabel}>Start Date</div>
+            <input type="date" value={start} onChange={e => setStart(e.target.value)} style={inputStyle} />
           </div>
-        </Section>
-      )}
-    </div>
+          <div>
+            <div style={fieldLabel}>Days (approx)</div>
+            <input type="number" min={1} value={days} onChange={e => setDays(e.target.value)} style={inputStyle} />
+          </div>
+          {calcEnd && (
+            <div style={{ gridColumn: '1 / -1', fontSize: 12, color: 'var(--ink-3)' }}>End: <strong style={{ color: 'var(--ink-1)' }}>{calcEnd}</strong></div>
+          )}
+          <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button onClick={() => setEditing(false)} style={secondaryBtn}>Cancel</button>
+            <button
+              onClick={() => {
+                if (!start) return
+                onUpdate({ project_start: start, project_end: calcEnd || start })
+                setEditing(false)
+              }}
+              disabled={!start}
+              style={{ ...primaryBtn, opacity: start ? 1 : 0.5 }}
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      </Section>
+    )
+  }
+
+  // Render the bar
+  const start_ = timeline.start
+  const end_ = timeline.end
+  const today = timeline.today
+  const total = Math.max(1, end_ - start_)
+  const elapsed = Math.max(0, today - start_)
+  const fillPct = Math.min(100, (elapsed / total) * 100)
+  const overdue = timeline.kind === 'overdue'
+  const completed = timeline.kind === 'completed'
+
+  const fillColor = completed ? 'var(--win)' : overdue ? 'var(--lose)' : 'var(--accent)'
+
+  return (
+    <Section>
+      <SectionTitle right={<button onClick={() => setEditing(true)} style={linkBtn}>Edit</button>}>Timeline</SectionTitle>
+      <div style={{ background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 10, padding: '14px' }}>
+        <div style={{ position: 'relative', height: 8, borderRadius: 4, background: 'var(--line)', overflow: 'visible' }}>
+          <div style={{ position: 'absolute', inset: '0 auto 0 0', width: `${fillPct}%`, background: fillColor, borderRadius: 4 }} />
+          {overdue && (
+            <div style={{ position: 'absolute', top: 0, bottom: 0, right: -6, width: 6, background: 'var(--lose)', borderRadius: '0 4px 4px 0' }} />
+          )}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, fontSize: 11, color: 'var(--ink-4)' }}>
+          <span>{shortDate(start_)}</span>
+          <span style={{ color: overdue ? 'var(--lose)' : 'var(--ink-2)', fontWeight: 600 }}>{timeline.label}</span>
+          <span>{shortDate(end_)}</span>
+        </div>
+      </div>
+    </Section>
   )
 }
 
-// ── SCORER TAB ───────────────────────────────────────────────
+// ── 3. Team ──────────────────────────────────────────────────
 
-function scoreFactor(label, detail, delta) {
-  if (delta == null) return null
-  const pos = delta >= 0
-  return { label, detail, delta, pos }
-}
+function TeamSection({ project, assignments, onEditTeam }) {
+  const hasTeam = assignments.length > 0
 
-function getDealFactors(project) {
-  const { square_footage: sqft, density, item_quality_score: quality, job_type } = project
-  const factors = []
-
-  if (sqft) {
-    const delta = sqft < 1500 ? -0.5 : sqft < 3500 ? +0.2 : +0.8
-    factors.push(scoreFactor('Square footage', `${Number(sqft).toLocaleString()} sqft`, delta))
+  if (!hasTeam) {
+    return (
+      <Section>
+        <SectionTitle>Team</SectionTitle>
+        <div style={{ background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 10, padding: '14px', textAlign: 'center' }}>
+          <div style={{ fontSize: 13, color: 'var(--ink-3)', marginBottom: 10 }}>No team assigned</div>
+          <button onClick={onEditTeam} style={primaryBtn}>
+            <Users size={13} style={{ marginRight: 6 }} /> Assign Team
+          </button>
+        </div>
+      </Section>
+    )
   }
-  if (density) {
-    const delta = { Low: -0.4, Medium: 0, High: +0.4 }[density] ?? 0
-    factors.push(scoreFactor('Item density', density, delta))
-  }
-  if (quality) {
-    const delta = quality <= 3 ? -0.5 : quality <= 5 ? 0 : quality <= 7 ? +0.4 : +0.8
-    factors.push(scoreFactor('Item quality', `${quality}/10`, delta))
-  }
-  if (job_type) {
-    const delta = job_type === 'Auction' ? +0.6 : job_type === 'Both' ? +0.4 : 0
-    factors.push(scoreFactor('Job type', job_type, delta))
-  }
-  return factors.filter(Boolean)
-}
-
-function ScorerTab({ project }) {
-  const d = project._scoreDetails || {}
-  const score = project.deal_score
-  const bid = d.recommendedBid
-  const scoreColor = !score ? 'var(--ink-3)' : score >= 8 ? 'var(--win)' : score >= 6 ? '#3b82f6' : score >= 4 ? 'var(--warn)' : 'var(--lose)'
-  const factors = getDealFactors(project)
-  const labor = d.labourCost || 0
-  const royalties = bid ? Math.round(bid * 0.08) : 0
-  const overhead = bid ? Math.round(bid * 0.15) : 0
 
   return (
-    <div>
-      {/* Score + bid hero */}
-      <div style={{ background: 'var(--bg-2)', borderRadius: 12, padding: '16px', marginBottom: 18, display: 'flex', alignItems: 'center', gap: 16 }}>
-        <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'var(--panel)', border: `3px solid ${scoreColor}`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          <span style={{ fontSize: 20, fontWeight: 800, color: scoreColor, lineHeight: 1 }}>{score != null ? score.toFixed(0) : '—'}</span>
-          <span style={{ fontSize: 9, color: 'var(--ink-3)', fontWeight: 600 }}>/ 10</span>
+    <Section>
+      <SectionTitle right={<button onClick={onEditTeam} style={linkBtn}>Edit Team</button>}>Team</SectionTitle>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 10 }}>
+        {assignments.map(a => {
+          const name = a.employees?.name || 'Unassigned'
+          const role = a.employees?.role
+          const hours = a.estimated_hours
+          return (
+            <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 9, background: 'var(--bg)', border: '1px solid var(--line)' }}>
+              <div style={{
+                width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
+                background: avatarColor(name), color: '#fff',
+                display: 'grid', placeItems: 'center',
+                fontSize: 11, fontWeight: 700,
+              }}>{initials(name)}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
+                <div style={{ fontSize: 11, color: 'var(--ink-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {role || (hours ? `~${Math.round(hours)} hrs` : '—')}
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </Section>
+  )
+}
+
+// ── 4. Financials ────────────────────────────────────────────
+
+const FIN_FIELDS = [
+  { key: 'bid_amount',           label: 'Bid Amount' },
+  { key: 'deposit_received',     label: 'Deposit Received' },
+  { key: 'actual_labour_cost',   label: 'Labour Cost' },
+  { key: 'actual_expenses',      label: 'Expenses' },
+  { key: 'actual_royalties',     label: 'Royalties' },
+]
+
+function FinancialsSection({ project, onSave }) {
+  const initialBid = project.bid_amount ?? project._scoreDetails?.recommendedBid ?? ''
+  const [values, setValues] = useState({
+    bid_amount:           initialBid === '' ? '' : String(initialBid),
+    deposit_received:     project.deposit_received != null ? String(project.deposit_received) : '',
+    actual_labour_cost:   project.actual_labour_cost != null ? String(project.actual_labour_cost) : '',
+    actual_expenses:      project.actual_expenses != null ? String(project.actual_expenses) : '',
+    actual_royalties:     project.actual_royalties != null ? String(project.actual_royalties) : '',
+  })
+  const [savedFlash, setSavedFlash] = useState(null) // field key
+  const debounceTimers = useRef({})
+
+  function commit(key, raw) {
+    const num = raw === '' ? null : Number(raw)
+    if (raw !== '' && Number.isNaN(num)) return
+    onSave({ [key]: num })
+    setSavedFlash(key)
+    setTimeout(() => setSavedFlash(f => f === key ? null : f), 1200)
+  }
+
+  function setField(key, raw) {
+    setValues(v => ({ ...v, [key]: raw }))
+    clearTimeout(debounceTimers.current[key])
+    debounceTimers.current[key] = setTimeout(() => commit(key, raw), 500)
+  }
+
+  useEffect(() => () => {
+    Object.values(debounceTimers.current).forEach(clearTimeout)
+  }, [])
+
+  const bid = Number(values.bid_amount) || 0
+  const labour = Number(values.actual_labour_cost) || 0
+  const exp = Number(values.actual_expenses) || 0
+  const roy = Number(values.actual_royalties) || 0
+  const profit = bid - labour - exp - roy
+  const margin = bid > 0 ? Math.round((profit / bid) * 100) : null
+
+  const marginColor =
+    margin == null ? 'var(--ink-3)'
+    : margin > 40 ? 'var(--win)'
+    : margin >= 20 ? 'var(--warn)'
+    : 'var(--lose)'
+
+  return (
+    <Section>
+      <SectionTitle>Financials</SectionTitle>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        {FIN_FIELDS.map(f => (
+          <div key={f.key}>
+            <div style={fieldLabel}>{f.label}</div>
+            <div style={{ position: 'relative' }}>
+              <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-4)', fontSize: 12, pointerEvents: 'none' }}>$</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                value={values[f.key]}
+                onChange={e => setField(f.key, e.target.value)}
+                onBlur={() => commit(f.key, values[f.key])}
+                style={{ ...inputStyle, paddingLeft: 22 }}
+                placeholder="0"
+              />
+              {savedFlash === f.key && (
+                <span style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', fontSize: 10.5, color: 'var(--win)', fontWeight: 600 }}>Saved ✓</span>
+              )}
+            </div>
+          </div>
+        ))}
+        <div>
+          <div style={fieldLabel}>Profit</div>
+          <div style={{ ...readonlyBox, color: profit > 0 ? 'var(--win)' : profit < 0 ? 'var(--lose)' : 'var(--ink-2)', fontWeight: 700 }}>
+            {bid ? `$${fmt$(profit)}` : '—'}
+          </div>
         </div>
         <div>
-          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Recommended Bid</div>
-          <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--ink-1)', letterSpacing: '-0.02em', lineHeight: 1.1 }}>{bid ? fmt$(bid) : '—'}</div>
-          {bid && (
-            <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 3 }}>
-              Range {fmt$(bid * 0.85)} – {fmt$(bid * 1.15)} · 80% confidence
-            </div>
-          )}
+          <div style={fieldLabel}>Margin</div>
+          <div style={{ ...readonlyBox, color: marginColor, fontWeight: 700 }}>
+            {margin != null ? `${margin}%` : '—'}
+          </div>
         </div>
       </div>
-
-      {/* Deal factors */}
-      {factors.length > 0 && (
-        <Section label="Deal Factors">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 0, background: 'var(--bg-2)', borderRadius: 10, overflow: 'hidden' }}>
-            {factors.map((f, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderBottom: i < factors.length - 1 ? '1px solid var(--line)' : 'none' }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink-1)' }}>{f.label}</div>
-                  <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>{f.detail}</div>
-                </div>
-                <span style={{
-                  fontSize: 12, fontWeight: 700, padding: '2px 8px', borderRadius: 5,
-                  background: f.pos ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
-                  color: f.pos ? '#22c55e' : '#ef4444',
-                }}>
-                  {f.delta >= 0 ? '+' : ''}{f.delta.toFixed(1)}
-                </span>
-              </div>
-            ))}
-          </div>
-        </Section>
-      )}
-
-      {/* Bid composition */}
-      {bid > 0 && (
-        <Section label="Bid Composition">
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            {[
-              ['Labor (est.)', labor ? fmt$(labor) : '—'],
-              ['Royalties (8%)', fmt$(royalties)],
-              ['Overhead (15%)', fmt$(overhead)],
-              ['Profit (est.)', fmt$(bid - labor - royalties - overhead)],
-            ].map(([label, value]) => (
-              <div key={label} style={{ background: 'var(--bg-2)', borderRadius: 8, padding: '10px 12px' }}>
-                <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 2 }}>{label}</div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--ink-1)' }}>{value}</div>
-              </div>
-            ))}
-          </div>
-        </Section>
-      )}
-    </div>
+    </Section>
   )
 }
 
-// ── TIMELINE TAB ─────────────────────────────────────────────
+// ── 5. Notes / Updates ───────────────────────────────────────
 
-function TimelineTab({ logs, loading, noTable }) {
-  if (loading) return <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--ink-3)', fontSize: 13 }}>Loading…</div>
-  if (noTable) return (
-    <div style={{ padding: '16px', background: 'var(--warn-soft)', border: '1px solid var(--warn)', borderRadius: 10 }}>
-      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--warn)', marginBottom: 4 }}>Timeline not set up</div>
-      <div style={{ fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.5 }}>
-        Run the project drawer migration in your Supabase SQL editor to enable the activity timeline.
-      </div>
-    </div>
-  )
-  if (logs.length === 0) return (
-    <div style={{ textAlign: 'center', color: 'var(--ink-4)', fontSize: 13, padding: '20px 0' }}>
-      No activity yet. Use the quick log buttons on the Overview tab.
-    </div>
-  )
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-      <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 12 }}>Recent Activity</div>
-      {logs.map((log, i) => (
-        <div key={log.id} style={{ display: 'flex', gap: 10, paddingBottom: 14, position: 'relative' }}>
-          {i < logs.length - 1 && (
-            <div style={{ position: 'absolute', left: 13, top: 28, bottom: 0, width: 2, background: 'var(--line)' }} />
-          )}
-          <Avatar name={log.user_name || 'System'} size={26} />
-          <div style={{ flex: 1, minWidth: 0, paddingTop: 2 }}>
-            <div style={{ fontSize: 13, color: 'var(--ink-1)', lineHeight: 1.4 }}>{log.text}</div>
-            <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 3 }}>{relDate(log.created_at)}</div>
-          </div>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-// ── FILES TAB ────────────────────────────────────────────────
-
-function FilesTab({ project, orgId }) {
-  const [files, setFiles] = useState([])
+function NotesSection({ project, currentUserName }) {
+  const [notes, setNotes] = useState([])
   const [loading, setLoading] = useState(true)
-  const [uploading, setUploading] = useState(false)
-  const [error, setError] = useState(null)
-  const fileRef = useRef()
-
-  useEffect(() => { fetchFiles() }, [project.id])
-
-  async function fetchFiles() {
-    setLoading(true)
-    try {
-      const { data, error: e } = await supabase.storage
-        .from('project-files')
-        .list(`${orgId}/${project.id}/files`, { sortBy: { column: 'created_at', order: 'desc' } })
-      if (e) { setError(e.message?.includes('bucket') ? 'setup' : e.message); setFiles([]) }
-      else setFiles((data || []).filter(f => f.name !== '.emptyFolderPlaceholder'))
-    } catch { setError('setup') }
-    setLoading(false)
-  }
-
-  async function upload(e) {
-    const file = e.target.files?.[0]; if (!file) return; e.target.value = ''
-    setUploading(true)
-    const { error: uploadErr } = await supabase.storage.from('project-files')
-      .upload(`${orgId}/${project.id}/files/${Date.now()}-${file.name}`, file)
-    if (uploadErr) setError(uploadErr.message)
-    else await fetchFiles()
-    setUploading(false)
-  }
-
-  async function openFile(file) {
-    const { data } = await supabase.storage.from('project-files')
-      .createSignedUrl(`${orgId}/${project.id}/files/${file.name}`, 60)
-    if (data?.signedUrl) window.open(data.signedUrl, '_blank')
-  }
-
-  async function deleteFile(file) {
-    if (!confirm(`Delete "${file.name.replace(/^\d+-/, '')}"?`)) return
-    await supabase.storage.from('project-files').remove([`${orgId}/${project.id}/files/${file.name}`])
-    setFiles(prev => prev.filter(f => f.name !== file.name))
-  }
-
-  if (error === 'setup') return (
-    <div style={{ padding: '16px', background: 'var(--warn-soft)', border: '1px solid var(--warn)', borderRadius: 10 }}>
-      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--warn)', marginBottom: 4 }}>Storage not configured</div>
-      <div style={{ fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.5 }}>
-        Create a Supabase Storage bucket named <code style={{ background: 'var(--bg-2)', padding: '1px 5px', borderRadius: 3 }}>project-files</code> (Private) to enable file attachments.
-      </div>
-    </div>
-  )
-
-  return (
-    <div>
-      <Section label="Attachments">
-        {loading ? (
-          <div style={{ textAlign: 'center', color: 'var(--ink-3)', fontSize: 13, padding: '16px 0' }}>Loading…</div>
-        ) : files.length === 0 ? (
-          <div style={{ textAlign: 'center', color: 'var(--ink-4)', fontSize: 13, padding: '12px 0' }}>No files attached yet.</div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
-            {files.map(file => {
-              const displayName = file.name.replace(/^\d+-/, '')
-              return (
-                <div key={file.name} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: 'var(--bg-2)', borderRadius: 9, border: '1px solid var(--line)' }}>
-                  <span style={{ color: 'var(--ink-3)', flexShrink: 0 }}><FileIcon name={displayName} /></span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayName}</div>
-                    {file.metadata?.size && <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>{fmtBytes(file.metadata.size)}</div>}
-                  </div>
-                  <button onClick={() => openFile(file)} style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid var(--line)', background: 'var(--panel)', color: 'var(--ink-2)', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Open</button>
-                  <button onClick={() => deleteFile(file)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--lose)', padding: 4, display: 'flex', alignItems: 'center' }}><Trash2 size={13} /></button>
-                </div>
-              )
-            })}
-          </div>
-        )}
-        <button
-          onClick={() => fileRef.current?.click()}
-          disabled={uploading}
-          style={{ width: '100%', padding: '10px', border: '2px dashed var(--line)', borderRadius: 9, background: 'transparent', color: 'var(--ink-3)', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
-        >
-          {uploading ? 'Uploading…' : '+ Attach file'}
-        </button>
-        <input ref={fileRef} type="file" style={{ display: 'none' }} onChange={upload} accept="image/*,.pdf,.doc,.docx,.xlsx,.xls,.csv,.zip" />
-      </Section>
-    </div>
-  )
-}
-
-// ── P&L TAB ──────────────────────────────────────────────────
-
-function PLTab({ project }) {
-  const d = project._scoreDetails || {}
-  const revenue = d.recommendedBid || 0
-  const labor = d.labourCost || 0
-  const royalties = revenue ? Math.round(revenue * 0.08) : 0
-  const expenses = 0 // actual expenses would come from project_logs
-  const netProfit = revenue - labor - royalties - expenses
-  const laborPct   = revenue ? Math.round((labor / revenue) * 100) : 0
-  const expPct     = revenue ? Math.round((expenses / revenue) * 100) : 0
-  const royPct     = revenue ? Math.round((royalties / revenue) * 100) : 0
-  const profitPct  = 100 - laborPct - expPct - royPct
-
-  const PLRow = ({ label, value, net, indent }) => (
-    <div style={{
-      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      padding: net ? '12px 14px' : '10px 14px',
-      background: net ? 'rgba(34,197,94,0.12)' : 'transparent',
-      borderBottom: net ? 'none' : '1px solid var(--line)',
-      paddingLeft: indent ? 20 : 14,
-    }}>
-      <span style={{ fontSize: net ? 14 : 13, fontWeight: net ? 700 : 500, color: net ? 'var(--win)' : 'var(--ink-1)' }}>{label}</span>
-      <span style={{ fontSize: net ? 15 : 13, fontWeight: 700, color: net ? 'var(--win)' : value < 0 ? 'var(--lose)' : value === 0 ? 'var(--ink-3)' : 'var(--ink-1)' }}>
-        {value === 0 ? '—' : value < 0 ? `– ${fmt$(Math.abs(value))}` : fmt$(value)}
-      </span>
-    </div>
-  )
-
-  return (
-    <div>
-      <Section label="Profit & Loss">
-        <div style={{ background: 'var(--bg-2)', borderRadius: 10, overflow: 'hidden', border: '1px solid var(--line)' }}>
-          <PLRow label="Revenue" value={revenue} />
-          <PLRow label="Labor" value={-labor} />
-          <PLRow label="Expenses" value={-expenses} />
-          <PLRow label="Royalties" value={-royalties} />
-          <PLRow label="Net Profit" value={netProfit} net />
-        </div>
-      </Section>
-
-      <Section label="Margin Breakdown">
-        <div style={{ height: 14, borderRadius: 7, overflow: 'hidden', display: 'flex', marginBottom: 10 }}>
-          <div style={{ width: `${laborPct}%`, background: '#3b82f6' }} />
-          <div style={{ width: `${expPct}%`, background: '#eab308' }} />
-          <div style={{ width: `${royPct}%`, background: '#6b7280' }} />
-          <div style={{ width: `${profitPct}%`, background: '#22c55e' }} />
-        </div>
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-          {[
-            { color: '#3b82f6', label: `Labor ${laborPct}%` },
-            { color: '#eab308', label: `Expenses ${expPct}%` },
-            { color: '#6b7280', label: `Royalties ${royPct}%` },
-            { color: '#22c55e', label: `Profit ${profitPct}%` },
-          ].map(({ color, label }) => (
-            <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <div style={{ width: 8, height: 8, borderRadius: 2, background: color }} />
-              <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>{label}</span>
-            </div>
-          ))}
-        </div>
-      </Section>
-    </div>
-  )
-}
-
-// ── RETROSPECTIVE TAB ─────────────────────────────────────────
-
-function RetrospectiveTab({ project, orgId }) {
-  const [retro, setRetro] = useState({ went_well: '', didnt_work: '', lessons: '', sentiment: 'okay', depth: 'lightweight' })
-  const [saved, setSaved] = useState(null) // iso string of last save
   const [noTable, setNoTable] = useState(false)
-  const saveTimer = useRef(null)
+  const [adding, setAdding] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    fetchRetro()
-    return () => clearTimeout(saveTimer.current)
+    let cancelled = false
+    async function fetch() {
+      const { data, error } = await supabase
+        .from('project_notes')
+        .select('*')
+        .eq('project_id', project.id)
+        .order('created_at', { ascending: false })
+        .limit(50)
+      if (cancelled) return
+      if (error) {
+        if (error.code === '42P01') setNoTable(true)
+        else logger.error('project_notes fetch failed', error)
+        setNotes([])
+      } else {
+        setNotes(data || [])
+      }
+      setLoading(false)
+    }
+    fetch()
+    return () => { cancelled = true }
   }, [project.id])
 
-  async function fetchRetro() {
-    try {
-      const { data, error } = await supabase.from('project_retrospectives')
-        .select('*').eq('lead_id', project.id).maybeSingle()
-      if (error) { if (error.code === '42P01') setNoTable(true); return }
-      if (data) setRetro({ went_well: data.went_well || '', didnt_work: data.didnt_work || '', lessons: data.lessons || '', sentiment: data.sentiment || 'okay', depth: data.depth || 'lightweight' })
-    } catch { setNoTable(true) }
+  async function handlePost() {
+    if (!draft.trim()) return
+    setSaving(true)
+    const { data, error } = await supabase.from('project_notes').insert({
+      project_id: project.id,
+      project_type: 'lead',
+      author: currentUserName || 'You',
+      content: draft.trim(),
+    }).select().single()
+    if (error) {
+      logger.error('project_notes insert failed', error)
+      if (error.code === '42P01') setNoTable(true)
+    } else if (data) {
+      setNotes(ns => [data, ...ns])
+      setDraft('')
+      setAdding(false)
+    }
+    setSaving(false)
   }
-
-  function update(key, value) {
-    setRetro(r => ({ ...r, [key]: value }))
-    clearTimeout(saveTimer.current)
-    saveTimer.current = setTimeout(() => autoSave({ ...retro, [key]: value }), 1200)
-  }
-
-  async function autoSave(data) {
-    try {
-      await supabase.from('project_retrospectives').upsert({
-        lead_id: project.id, organization_id: orgId,
-        went_well: data.went_well, didnt_work: data.didnt_work,
-        lessons: data.lessons, sentiment: data.sentiment, depth: data.depth,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'lead_id' })
-      setSaved(new Date().toISOString())
-    } catch { /* table may not exist */ }
-  }
-
-  const Textarea = ({ field, placeholder }) => (
-    <textarea
-      value={retro[field]}
-      onChange={e => update(field, e.target.value)}
-      placeholder={placeholder}
-      rows={3}
-      style={{ width: '100%', boxSizing: 'border-box', background: 'var(--bg-2)', border: '1px solid var(--line)', borderRadius: 9, padding: '10px 12px', color: 'var(--ink-1)', fontSize: 13, fontFamily: 'inherit', resize: 'vertical', outline: 'none', lineHeight: 1.5 }}
-    />
-  )
-
-  if (noTable) return (
-    <div style={{ padding: '16px', background: 'var(--warn-soft)', border: '1px solid var(--warn)', borderRadius: 10 }}>
-      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--warn)', marginBottom: 4 }}>Retrospective not set up</div>
-      <div style={{ fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.5 }}>Run the project drawer migration SQL in Supabase to enable retrospectives.</div>
-    </div>
-  )
 
   return (
-    <div>
-      {/* Depth toggle + save indicator */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-        <div style={{ display: 'flex', background: 'var(--bg-2)', border: '1px solid var(--line)', borderRadius: 8, padding: 2 }}>
-          {['lightweight', 'full'].map(d => (
-            <button key={d} onClick={() => update('depth', d)} style={{ padding: '4px 12px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit', background: retro.depth === d ? 'var(--accent)' : 'transparent', color: retro.depth === d ? 'white' : 'var(--ink-3)', textTransform: 'capitalize' }}>
-              {d.charAt(0).toUpperCase() + d.slice(1)}
-            </button>
-          ))}
+    <Section>
+      <SectionTitle right={!adding ? <button onClick={() => setAdding(true)} style={linkBtn}>+ Add update</button> : null}>Updates</SectionTitle>
+
+      {noTable && (
+        <div style={{ padding: '10px 12px', background: 'var(--warn-soft)', border: '1px solid color-mix(in oklab, var(--warn) 25%, var(--line))', borderRadius: 9, fontSize: 12, color: 'var(--ink-2)', marginBottom: 12 }}>
+          The <code>project_notes</code> table isn't set up yet. Run the Phase 2 migration to enable updates.
         </div>
-        {saved && (
-          <span style={{ fontSize: 11, color: 'var(--win)', background: 'var(--win-soft)', padding: '3px 8px', borderRadius: 5 }}>
-            Draft saved · {relDate(saved)}
-          </span>
-        )}
-      </div>
+      )}
 
-      <Section label="What went well?">
-        <Textarea field="went_well" placeholder="What worked great on this project?" />
-      </Section>
-      <Section label="What didn't?">
-        <Textarea field="didnt_work" placeholder="What would you do differently?" />
-      </Section>
-      <Section label="Lessons for next time">
-        <Textarea field="lessons" placeholder="Key takeaways for the team…" />
-      </Section>
+      {adding && (
+        <div style={{ marginBottom: 12, background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 10, padding: 10 }}>
+          <textarea
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            placeholder="What happened today?"
+            rows={3}
+            autoFocus
+            style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.5, fontFamily: 'inherit' }}
+          />
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
+            <button onClick={() => { setAdding(false); setDraft('') }} style={secondaryBtn}>Cancel</button>
+            <button onClick={handlePost} disabled={saving || !draft.trim()} style={{ ...primaryBtn, opacity: saving || !draft.trim() ? 0.5 : 1 }}>
+              {saving ? 'Posting…' : 'Post'}
+            </button>
+          </div>
+        </div>
+      )}
 
-      <Section label="Client Sentiment">
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {SENTIMENTS.map(s => (
-            <button key={s.key} onClick={() => update('sentiment', s.key)} style={{
-              padding: '8px 14px', borderRadius: 9, border: '1px solid var(--line)',
-              background: retro.sentiment === s.key ? 'var(--win)' : 'var(--bg-2)',
-              color: retro.sentiment === s.key ? 'white' : 'var(--ink-2)',
-              fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+      {loading ? (
+        <div style={{ fontSize: 12.5, color: 'var(--ink-4)' }}>Loading…</div>
+      ) : notes.length === 0 && !noTable ? (
+        <div style={{ fontSize: 12.5, color: 'var(--ink-4)' }}>No updates yet.</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+          {notes.map((n, i) => (
+            <div key={n.id} style={{
+              padding: '10px 0',
+              borderBottom: i < notes.length - 1 ? '1px solid var(--line-2)' : 'none',
             }}>
-              {s.label}
-            </button>
+              <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 4 }}>
+                <span style={{ fontWeight: 600, color: 'var(--ink-2)' }}>{shortDate(n.created_at)}</span>
+                {n.author && <> — <span style={{ fontWeight: 600, color: 'var(--ink-2)' }}>{n.author}</span></>}
+                <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--ink-4)' }}>{relTime(n.created_at)}</span>
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--ink-1)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{n.content}</div>
+            </div>
           ))}
         </div>
-      </Section>
-    </div>
+      )}
+    </Section>
   )
 }
 
-// ── PHOTOS TAB ────────────────────────────────────────────────
+// ── 6. Checklist ─────────────────────────────────────────────
 
-const PHASES = ['Before', 'During', 'After']
+function ChecklistSection({ project, onSave }) {
+  const checklist = Array.isArray(project.checklist) ? project.checklist : []
+  const { done, total } = checklistProgress(checklist)
 
-function PhotosTab({ project, orgId }) {
-  const [photos, setPhotos] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [uploading, setUploading] = useState(false)
-  const [uploadPhase, setUploadPhase] = useState('Before')
-  const [portfolio, setPortfolio] = useState(false)
-  const [storageErr, setStorageErr] = useState(false)
-  const fileRef = useRef()
-
-  useEffect(() => { fetchPhotos() }, [project.id])
-
-  async function fetchPhotos() {
-    setLoading(true)
-    try {
-      const { data, error } = await supabase.storage
-        .from('project-files')
-        .list(`${orgId}/${project.id}/photos`, { sortBy: { column: 'created_at', order: 'asc' } })
-      if (error) { setStorageErr(true); setPhotos([]) }
-      else setPhotos((data || []).filter(f => f.name !== '.emptyFolderPlaceholder'))
-    } catch { setStorageErr(true) }
-    setLoading(false)
+  function toggle(i) {
+    const updated = checklist.map((x, idx) => idx === i ? { ...x, done: !x.done } : x)
+    onSave({ checklist: updated })
   }
 
-  async function upload(e) {
-    const file = e.target.files?.[0]; if (!file) return; e.target.value = ''
+  function generate() {
+    onSave({ checklist: getChecklistForType(project.job_type) })
+  }
+
+  return (
+    <Section>
+      <SectionTitle right={total > 0 && <span style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 500 }}>{done} of {total} complete</span>}>
+        Tasks
+      </SectionTitle>
+
+      {total === 0 ? (
+        <div style={{ background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 10, padding: '14px', textAlign: 'center' }}>
+          {project.job_type ? (
+            <>
+              <div style={{ fontSize: 13, color: 'var(--ink-3)', marginBottom: 10 }}>No tasks yet for {project.job_type}</div>
+              <button onClick={generate} style={primaryBtn}>Generate Tasks</button>
+            </>
+          ) : (
+            <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>Set a job type to generate tasks.</div>
+          )}
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {checklist.map((item, i) => (
+            <button
+              key={i}
+              onClick={() => toggle(i)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                padding: '8px 12px', borderRadius: 8, border: '1px solid var(--line)',
+                background: item.done ? 'var(--win-soft)' : 'var(--bg)',
+                cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit',
+              }}
+            >
+              {item.done
+                ? <CheckSquare size={14} strokeWidth={1.8} color="var(--win)" />
+                : <Square size={14} strokeWidth={1.8} color="var(--ink-4)" />}
+              <span style={{
+                fontSize: 13, color: item.done ? 'var(--win)' : 'var(--ink-1)',
+                textDecoration: item.done ? 'line-through' : 'none',
+                opacity: item.done ? 0.75 : 1,
+              }}>{item.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </Section>
+  )
+}
+
+// ── 7. Photos ────────────────────────────────────────────────
+
+async function uploadToCloudinary(file) {
+  const fd = new FormData()
+  fd.append('file', file)
+  fd.append('upload_preset', UPLOAD_PRESET)
+  let res
+  try {
+    res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/auto/upload`, {
+      method: 'POST', body: fd,
+    })
+  } catch (err) {
+    throw new Error(`Network error: could not reach Cloudinary (${err.message}).`)
+  }
+  if (!res.ok) {
+    let detail = ''
+    try {
+      const body = await res.json()
+      detail = body?.error?.message || JSON.stringify(body)
+    } catch {
+      detail = await res.text().catch(() => '')
+    }
+    throw new Error(`Upload failed (HTTP ${res.status}): ${detail || 'unknown'}`)
+  }
+  return res.json()
+}
+
+function PhotosSection({ project, onSave }) {
+  const photos = Array.isArray(project.photos) ? project.photos : []
+  const fileRef = useRef(null)
+  const [uploading, setUploading] = useState(false)
+  const [error, setError] = useState(null)
+  const [lightbox, setLightbox] = useState(null)
+
+  async function handleFiles(e) {
+    const files = Array.from(e.target.files || [])
+    e.target.value = ''
+    if (files.length === 0) return
     setUploading(true)
-    const path = `${orgId}/${project.id}/photos/${uploadPhase}-${Date.now()}-${file.name}`
-    await supabase.storage.from('project-files').upload(path, file)
-    await fetchPhotos()
+    setError(null)
+    const added = []
+    for (const file of files) {
+      try {
+        const data = await uploadToCloudinary(file)
+        added.push({ url: data.secure_url, uploaded_at: new Date().toISOString() })
+      } catch (err) {
+        logger.error('Photo upload failed', err)
+        setError(err.message)
+      }
+    }
+    if (added.length > 0) {
+      onSave({ photos: [...photos, ...added] })
+    }
     setUploading(false)
   }
 
-  async function openPhoto(photo) {
-    const { data } = await supabase.storage.from('project-files')
-      .createSignedUrl(`${orgId}/${project.id}/photos/${photo.name}`, 60)
-    if (data?.signedUrl) window.open(data.signedUrl, '_blank')
+  function deletePhoto(idx) {
+    const next = photos.filter((_, i) => i !== idx)
+    onSave({ photos: next })
   }
 
-  if (storageErr) return (
-    <div style={{ padding: '16px', background: 'var(--warn-soft)', border: '1px solid var(--warn)', borderRadius: 10 }}>
-      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--warn)', marginBottom: 4 }}>Storage not configured</div>
-      <div style={{ fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.5 }}>Create a <code style={{ background: 'var(--bg-2)', padding: '1px 5px', borderRadius: 3 }}>project-files</code> bucket in Supabase Storage (Private).</div>
-    </div>
-  )
-
   return (
-    <div>
-      <Section label="Before · During · After">
-        {/* Phase selector */}
-        <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-          {PHASES.map(p => (
-            <button key={p} onClick={() => setUploadPhase(p)} style={{ padding: '4px 12px', borderRadius: 7, border: '1px solid var(--line)', background: uploadPhase === p ? 'var(--accent)' : 'var(--bg-2)', color: uploadPhase === p ? 'white' : 'var(--ink-2)', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
-              {p}
-            </button>
+    <Section>
+      <SectionTitle right={
+        <button onClick={() => fileRef.current?.click()} style={linkBtn} disabled={uploading}>
+          {uploading ? 'Uploading…' : '+ Add Photos'}
+        </button>
+      }>Photos</SectionTitle>
+      <input ref={fileRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={handleFiles} />
+
+      {photos.length === 0 ? (
+        <div style={{ fontSize: 12.5, color: 'var(--ink-4)' }}>No photos yet.</div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+          {photos.map((p, i) => (
+            <div key={i} style={{ position: 'relative', aspectRatio: '1', borderRadius: 8, overflow: 'hidden', background: 'var(--bg-2)', cursor: 'pointer' }}
+              onClick={() => setLightbox(p.url)}
+              onMouseEnter={e => { const btn = e.currentTarget.querySelector('[data-del]'); if (btn) btn.style.opacity = '1' }}
+              onMouseLeave={e => { const btn = e.currentTarget.querySelector('[data-del]'); if (btn) btn.style.opacity = '0' }}
+            >
+              <img src={p.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+              <button
+                data-del
+                onClick={e => { e.stopPropagation(); deletePhoto(i) }}
+                style={{ position: 'absolute', top: 4, right: 4, width: 22, height: 22, borderRadius: '50%', border: 'none', background: 'rgba(0,0,0,0.55)', color: '#fff', cursor: 'pointer', display: 'grid', placeItems: 'center', opacity: 0, transition: 'opacity 120ms' }}
+                aria-label="Delete photo"
+              >
+                <X size={12} />
+              </button>
+            </div>
           ))}
         </div>
+      )}
 
-        {loading ? (
-          <div style={{ textAlign: 'center', color: 'var(--ink-3)', fontSize: 13, padding: '20px 0' }}>Loading…</div>
-        ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 12 }}>
-            {photos.map(photo => {
-              const phase = photo.name.split('-')[0]
-              const hue = phase === 'Before' ? 140 : phase === 'During' ? 200 : 280
-              return (
-                <div key={photo.name} onClick={() => openPhoto(photo)}
-                  style={{ position: 'relative', aspectRatio: '1', borderRadius: 8, overflow: 'hidden', background: `linear-gradient(135deg, oklch(0.75 0.1 ${hue}), oklch(0.6 0.12 ${hue + 20}))`, cursor: 'pointer' }}>
-                  <span style={{ position: 'absolute', top: 6, left: 6, fontSize: 9.5, fontWeight: 700, background: 'rgba(0,0,0,0.5)', color: 'white', padding: '2px 7px', borderRadius: 4 }}>{phase}</span>
-                </div>
-              )
-            })}
-            {/* Upload tile */}
-            <div onClick={() => fileRef.current?.click()}
-              style={{ aspectRatio: '1', borderRadius: 8, border: '2px dashed var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', background: 'var(--bg-2)' }}>
-              <span style={{ fontSize: 22, color: 'var(--ink-3)', fontWeight: 300 }}>{uploading ? '…' : '+'}</span>
-            </div>
-          </div>
-        )}
-        <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={upload} />
-      </Section>
-
-      <Section label="Portfolio Settings">
-        <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', padding: '10px 12px', background: 'var(--bg-2)', borderRadius: 9, border: '1px solid var(--line)' }}>
-          <input type="checkbox" checked={portfolio} onChange={e => setPortfolio(e.target.checked)}
-            style={{ width: 16, height: 16, accentColor: 'var(--accent)', cursor: 'pointer' }} />
-          <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink-1)' }}>Include in public portfolio</span>
-        </label>
-      </Section>
-    </div>
-  )
-}
-
-// ── LOG MODAL ─────────────────────────────────────────────────
-
-function LogModal({ category, onClose, onSave }) {
-  const [text, setText] = useState('')
-  const [amount, setAmount] = useState('')
-  const hasAmount = ['Labor hours', 'Supplies spent', 'Dumpster fee'].includes(category)
-
-  function handleSave() {
-    if (!text.trim()) return
-    onSave({ text: text.trim(), category, amount: amount ? parseFloat(amount) : null })
-    onClose()
-  }
-
-  return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 14, width: '100%', maxWidth: 380, padding: 20 }}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink-1)', marginBottom: 14 }}>Log {category}</div>
-        <textarea value={text} onChange={e => setText(e.target.value)}
-          placeholder={`Note about ${category.toLowerCase()}…`} rows={3} autoFocus
-          style={{ width: '100%', boxSizing: 'border-box', background: 'var(--bg-2)', border: '1px solid var(--line)', borderRadius: 9, padding: '10px 12px', color: 'var(--ink-1)', fontSize: 13, fontFamily: 'inherit', resize: 'none', outline: 'none', marginBottom: 10 }}
-        />
-        {hasAmount && (
-          <input type="number" value={amount} onChange={e => setAmount(e.target.value)}
-            placeholder={category === 'Labor hours' ? 'Hours (e.g. 4.5)' : 'Amount ($)'}
-            style={{ width: '100%', boxSizing: 'border-box', background: 'var(--bg-2)', border: '1px solid var(--line)', borderRadius: 9, padding: '8px 12px', color: 'var(--ink-1)', fontSize: 13, fontFamily: 'inherit', outline: 'none', marginBottom: 10 }}
-          />
-        )}
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={onClose} style={{ flex: 1, padding: '9px', borderRadius: 9, border: '1px solid var(--line)', background: 'var(--bg-2)', color: 'var(--ink-2)', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
-          <button onClick={handleSave} disabled={!text.trim()} style={{ flex: 2, padding: '9px', borderRadius: 9, border: 'none', background: 'var(--accent)', color: 'white', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', opacity: text.trim() ? 1 : 0.5 }}>Save Log</button>
+      {error && (
+        <div style={{ marginTop: 10, padding: '6px 10px', fontSize: 12, color: 'var(--lose)', background: 'var(--lose-soft)', borderRadius: 6 }}>
+          {error}
         </div>
-      </div>
-    </div>
+      )}
+
+      {lightbox && (
+        <div
+          onClick={() => setLightbox(null)}
+          style={{ position: 'fixed', inset: 0, zIndex: 400, background: 'rgba(0,0,0,0.85)', display: 'grid', placeItems: 'center', padding: 20, cursor: 'pointer' }}
+        >
+          <img src={lightbox} alt="" style={{ maxWidth: '95%', maxHeight: '95%', objectFit: 'contain', borderRadius: 8 }} />
+        </div>
+      )}
+    </Section>
   )
 }
 
-// ── MAIN DRAWER ───────────────────────────────────────────────
+// ── 8. Documents ─────────────────────────────────────────────
 
-export default function ProjectDrawer({ project, onClose, onDelete, onProjectUpdated }) {
-  const { organizationId } = useAuth()
-  const { members } = useTeam()
-  const [activeTab, setActiveTab] = useState('overview')
-  const [logs, setLogs] = useState([])
-  const [logsLoading, setLogsLoading] = useState(false)
-  const [logsNoTable, setLogsNoTable] = useState(false)
-  const [logModal, setLogModal] = useState(null)
-  const [copied, setCopied] = useState(false)
-  const [confirmDelete, setConfirmDelete] = useState(false)
+function DocumentsSection({ project }) {
+  // Documents read-only / placeholder until Storage is configured.
+  // This section exists so the panel always renders the full 8-section layout.
+  return (
+    <Section>
+      <SectionTitle right={
+        <button style={{ ...linkBtn, opacity: 0.5, cursor: 'not-allowed' }} title="Coming soon" disabled>+ Attach</button>
+      }>Documents</SectionTitle>
+      <div style={{ background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 10, padding: '14px', textAlign: 'center', color: 'var(--ink-4)', fontSize: 12.5 }}>
+        No documents attached
+      </div>
+    </Section>
+  )
+}
 
-  const isCompleted = project?.status === 'Won' || project?.status === 'Project Completed'
+// ── Main drawer ──────────────────────────────────────────────
 
-  const TABS = isCompleted
-    ? [['overview', 'Overview'], ['pl', 'P&L'], ['retrospective', 'Retrospective'], ['photos', 'Photos']]
-    : [['overview', 'Overview'], ['scorer', 'Scorer'], ['timeline', 'Timeline'], ['files', 'Files']]
+export default function ProjectDrawer({ project, onClose, onProjectUpdated, onDelete, onOpenScorer }) {
+  const { organizationId, user } = useAuth()
+  const [local, setLocal] = useState(project)
+  const [assignments, setAssignments] = useState([])
+  const [showConvert, setShowConvert] = useState(false)
+  const [showComplete, setShowComplete] = useState(false)
 
+  useEffect(() => { setLocal(project) }, [project])
+
+  const isCompleted = local?.status === 'Won' || local?.status === 'Project Completed'
+  const timeline = useMemo(() => timelineState(local || {}), [local])
+
+  // Load assignments once + when project id changes
   useEffect(() => {
-    if (!project?.id) return
-    setActiveTab('overview')
-    if (!isCompleted) fetchLogs()
-  }, [project?.id])
+    if (!local?.id) return
+    let cancelled = false
+    async function load() {
+      const { data, error } = await supabase
+        .from('project_assignments')
+        .select('id, estimated_hours, employees(id, name, role, active)')
+        .eq('lead_id', local.id)
+      if (!cancelled && !error) setAssignments(data || [])
+    }
+    load()
+    return () => { cancelled = true }
+  }, [local?.id])
 
-  async function fetchLogs() {
-    setLogsLoading(true)
-    try {
-      const { data, error } = await supabase.from('project_logs')
-        .select('*').eq('lead_id', project.id)
-        .order('created_at', { ascending: false }).limit(30)
-      if (error) { if (error.code === '42P01') setLogsNoTable(true); setLogs([]) }
-      else setLogs(data || [])
-    } catch { setLogsNoTable(true) }
-    setLogsLoading(false)
+  if (!local) return null
+
+  // Generic save: optimistic update + supabase update + bubble up
+  async function saveFields(fields) {
+    setLocal(prev => ({ ...prev, ...fields }))
+    const { error } = await supabase.from('leads').update(fields).eq('id', local.id)
+    if (error) {
+      logger.error('ProjectDrawer save failed', error)
+      // Revert (best-effort) by re-fetching
+      const { data } = await supabase.from('leads').select('*').eq('id', local.id).single()
+      if (data) setLocal(data)
+    } else {
+      onProjectUpdated?.()
+    }
   }
 
-  async function saveLog({ text, category, amount }) {
-    try {
-      await supabase.from('project_logs').insert({
-        lead_id: project.id, organization_id: organizationId,
-        user_name: 'You', text, category, amount,
-      })
-      fetchLogs()
-    } catch { /* table may not exist */ }
+  function handleEditTeam() {
+    // Reuse the convert flow's team UI when project is not yet active.
+    // For active/completed projects, open the scorer modal as a placeholder
+    // until a dedicated team-edit modal is built.
+    setShowConvert(true)
   }
-
-  async function convertToOngoing() {
-    await supabase.from('leads').update({ status: 'Project Scheduled' }).eq('id', project.id)
-    onClose()
-  }
-
-  async function handleAssign(memberId) {
-    await supabase.from('leads').update({ assigned_to: memberId }).eq('id', project.id)
-    onProjectUpdated?.()
-  }
-
-  function copyLink() {
-    navigator.clipboard.writeText(window.location.origin + `/?project=${project.id}`)
-    setCopied(true); setTimeout(() => setCopied(false), 2000)
-  }
-
-  if (!project) return null
-
-  const d = project._scoreDetails || {}
-  const chip = JOB_CHIP[project.job_type] || JOB_CHIP['Both']
-  const idShort = '#' + String(project.id).replace(/-/g, '').slice(0, 6).toUpperCase()
-
-  const statusColor = isCompleted ? '#22c55e'
-    : project.status === 'Lost' ? 'var(--lose)'
-    : project.status?.includes('Scheduled') ? 'var(--warn)'
-    : 'var(--ink-3)'
-  const statusLabel = isCompleted ? 'Completed'
-    : project.status?.includes('Scheduled') ? 'Scheduled'
-    : project.deal_score ? 'Scored' : 'Draft'
 
   return (
     <>
       {/* Backdrop */}
-      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 49, background: 'rgba(0,0,0,0.4)' }} />
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 49, background: 'var(--overlay)' }} />
 
       {/* Drawer */}
-      <div style={{
-        position: 'fixed', right: 0, top: 0, bottom: 0, width: 520, zIndex: 50,
+      <aside style={{
+        position: 'fixed', top: 0, right: 0, bottom: 0, width: 540, zIndex: 50,
         background: 'var(--panel)', borderLeft: '1px solid var(--line)',
-        boxShadow: '-8px 0 48px rgba(0,0,0,0.24)', display: 'flex', flexDirection: 'column',
-        overflowY: 'hidden',
+        boxShadow: '-8px 0 48px rgba(0,0,0,0.18)',
+        display: 'flex', flexDirection: 'column',
+        animation: 'slidein 220ms cubic-bezier(.2,.7,.3,1.05)',
       }}>
-        {/* ── Top header ── */}
-        <div style={{ padding: '14px 18px 0', flexShrink: 0 }}>
-          {/* Chips row */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-            <span style={{ fontSize: 11, fontWeight: 700, background: chip.bg, color: chip.accent, padding: '2px 8px', borderRadius: 5 }}>
-              {project.job_type}
-            </span>
-            <span style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 500 }}>{idShort}</span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 600, color: statusColor }}>
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: statusColor, display: 'inline-block' }} />
-              {statusLabel}
-            </span>
-            <div style={{ flex: 1 }} />
-            <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-3)', padding: 4, display: 'flex' }}><X size={17} /></button>
-          </div>
+        <HeaderSection
+          project={local}
+          timeline={timeline}
+          onClose={onClose}
+          onEdit={() => onOpenScorer?.(local)}
+          onMarkComplete={() => setShowComplete(true)}
+          onDelete={onDelete}
+        />
 
-          {/* Name + address */}
-          <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--ink-1)', letterSpacing: '-0.02em', marginBottom: 4 }}>{project.name}</div>
-          {project.address && (
-            <div style={{ fontSize: 12.5, color: 'var(--ink-3)', marginBottom: 4 }}>📍 {project.address}</div>
+        {/* Scrollable body — all 8 sections in order, no tabs */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '18px 18px 20px' }}>
+          <TimelineSection project={local} timeline={timeline} onUpdate={saveFields} />
+          <TeamSection project={local} assignments={assignments} onEditTeam={handleEditTeam} />
+          <FinancialsSection project={local} onSave={saveFields} />
+          <NotesSection project={local} currentUserName={user?.email || 'You'} />
+          <ChecklistSection project={local} onSave={saveFields} />
+          <PhotosSection project={local} onSave={saveFields} />
+          <DocumentsSection project={local} />
+        </div>
+
+        {/* Footer — primary action depends on state */}
+        <div style={{ padding: '12px 18px', borderTop: '1px solid var(--line)', display: 'flex', gap: 8, flexShrink: 0 }}>
+          {!isCompleted && timeline.kind !== 'active' && timeline.kind !== 'overdue' && (
+            <button onClick={() => setShowConvert(true)} style={{ ...primaryBtn, flex: 1 }}>
+              Convert to Active
+            </button>
           )}
-          {project.notes && (
-            <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 10, lineHeight: 1.4, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-              {project.notes}
+          {(timeline.kind === 'active' || timeline.kind === 'overdue') && !isCompleted && (
+            <button onClick={() => setShowComplete(true)} style={{ ...primaryBtn, flex: 1 }}>
+              <CheckCircle size={13} style={{ marginRight: 6 }} /> Mark Complete
+            </button>
+          )}
+          {isCompleted && (
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12.5, color: 'var(--win)', fontWeight: 600 }}>
+              <CheckCircle size={13} style={{ marginRight: 6 }} /> Completed
             </div>
           )}
-
-          {/* Stats bar */}
-          <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
-            {isCompleted ? (
-              <>
-                <StatBox label="Revenue" value={d.recommendedBid ? fmt$(d.recommendedBid) : '—'} />
-                <StatBox label="Profit" value={d.estimatedProfit ? fmt$(d.estimatedProfit) : 'Pending'} color={d.estimatedProfit ? 'var(--win)' : 'var(--ink-3)'} />
-                <StatBox label="Margin" value={d.profitMarginPct != null ? `${Math.round(d.profitMarginPct)}%` : '—'} />
-                <StatBox label="Labor" value={d.labourCost ? fmt$(d.labourCost) : '—'} />
-              </>
-            ) : (
-              <>
-                <StatBox label="Deal Score" value={project.deal_score != null ? `${project.deal_score.toFixed(1)}/10` : '—'} color={project.deal_score >= 7 ? 'var(--win)' : project.deal_score >= 5 ? '#3b82f6' : 'var(--warn)'} />
-                <StatBox label="Rec. Bid" value={d.recommendedBid ? fmt$(d.recommendedBid) : '—'} />
-                <StatBox label="Sq Ft" value={project.square_footage ? Number(project.square_footage).toLocaleString() : '—'} />
-                <StatBox label="Quality" value={project.item_quality_score ? `${project.item_quality_score}/10` : '—'} />
-              </>
-            )}
-          </div>
-
-          {/* Tabs */}
-          <div style={{ display: 'flex', borderBottom: '1px solid var(--line)', marginBottom: 0 }}>
-            {TABS.map(([key, label]) => (
-              <button key={key} onClick={() => setActiveTab(key)} style={{
-                padding: '8px 14px', border: 'none', background: 'transparent', cursor: 'pointer',
-                fontSize: 13, fontWeight: 600, fontFamily: 'inherit',
-                color: activeTab === key ? 'var(--ink-1)' : 'var(--ink-3)',
-                borderBottom: activeTab === key ? '2px solid var(--accent)' : '2px solid transparent',
-                marginBottom: -1,
-              }}>{label}</button>
-            ))}
-          </div>
         </div>
+      </aside>
 
-        {/* ── Scrollable body ── */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '18px 18px 8px' }}>
-          {activeTab === 'overview' && (
-            <OverviewTab
-              project={project}
-              members={members}
-              isCompleted={isCompleted}
-              logs={logs}
-              onLog={cat => setLogModal(cat)}
-              onAssign={handleAssign}
-            />
-          )}
-          {activeTab === 'scorer' && <ScorerTab project={project} />}
-          {activeTab === 'timeline' && <TimelineTab logs={logs} loading={logsLoading} noTable={logsNoTable} />}
-          {activeTab === 'files' && <FilesTab project={project} orgId={organizationId} />}
-          {activeTab === 'pl' && <PLTab project={project} />}
-          {activeTab === 'retrospective' && <RetrospectiveTab project={project} orgId={organizationId} />}
-          {activeTab === 'photos' && <PhotosTab project={project} orgId={organizationId} />}
-        </div>
+      {showConvert && (
+        <ConvertToActiveModal
+          project={local}
+          onClose={() => setShowConvert(false)}
+          onConverted={updated => {
+            setShowConvert(false)
+            setLocal(updated)
+            onProjectUpdated?.()
+          }}
+        />
+      )}
 
-        {/* ── Footer ── */}
-        <div style={{ padding: '12px 18px', borderTop: '1px solid var(--line)', flexShrink: 0, display: 'flex', gap: 8 }}>
-          {confirmDelete ? (
-            <>
-              <span style={{ fontSize: 12.5, color: 'var(--ink-3)', alignSelf: 'center', flex: 1 }}>Delete this project?</span>
-              <button onClick={() => setConfirmDelete(false)} style={{ padding: '8px 14px', borderRadius: 9, border: '1px solid var(--line)', background: 'var(--bg-2)', color: 'var(--ink-2)', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
-              <button onClick={() => onDelete?.(project.id)} style={{ padding: '8px 14px', borderRadius: 9, border: 'none', background: '#ef4444', color: 'white', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Delete</button>
-            </>
-          ) : isCompleted ? (
-            <>
-              <button onClick={() => setConfirmDelete(true)} style={{ padding: '9px 12px', borderRadius: 9, border: '1px solid var(--line)', background: 'var(--bg-2)', color: '#ef4444', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 5 }}>
-                <Trash2 size={13} />
-              </button>
-              <button style={{ flex: 1, padding: '9px', borderRadius: 9, border: '1px solid var(--line)', background: 'var(--bg-2)', color: 'var(--ink-2)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                <Download size={13} /> Export PDF
-              </button>
-              <button onClick={copyLink} style={{ flex: 1, padding: '9px', borderRadius: 9, border: '1px solid var(--line)', background: 'var(--bg-2)', color: 'var(--ink-2)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                {copied ? <Check size={13} /> : <Copy size={13} />}
-                {copied ? 'Copied!' : 'Share link'}
-              </button>
-              <button style={{ flex: 1.5, padding: '9px', borderRadius: 9, border: 'none', background: 'var(--accent)', color: 'white', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                <Star size={13} /> Add to Portfolio
-              </button>
-            </>
-          ) : (
-            <>
-              <button onClick={() => setConfirmDelete(true)} style={{ padding: '9px 12px', borderRadius: 9, border: '1px solid var(--line)', background: 'var(--bg-2)', color: '#ef4444', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 5 }}>
-                <Trash2 size={13} />
-              </button>
-              <button
-                onClick={() => project.phone && (window.location.href = `tel:${project.phone}`)}
-                style={{ flex: 1, padding: '9px', borderRadius: 9, border: '1px solid var(--line)', background: 'var(--bg-2)', color: 'var(--ink-2)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
-              >
-                <Phone size={13} /> Call
-              </button>
-              <button onClick={() => setLogModal('Notes')} style={{ flex: 1, padding: '9px', borderRadius: 9, border: '1px solid var(--line)', background: 'var(--bg-2)', color: 'var(--ink-2)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                <FileText size={13} /> Log note
-              </button>
-              <button onClick={convertToOngoing} style={{ flex: 1.5, padding: '9px', borderRadius: 9, border: 'none', background: 'var(--accent)', color: 'white', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
-                Convert to Ongoing
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Log modal */}
-      {logModal && (
-        <LogModal
-          category={logModal}
-          onClose={() => setLogModal(null)}
-          onSave={saveLog}
+      {showComplete && (
+        <MarkCompleteModal
+          project={local}
+          onClose={() => setShowComplete(false)}
+          onCompleted={updated => {
+            setShowComplete(false)
+            setLocal(updated)
+            onProjectUpdated?.()
+          }}
         />
       )}
     </>
   )
+}
+
+// ── Shared styles ────────────────────────────────────────────
+
+const inputStyle = {
+  width: '100%', boxSizing: 'border-box',
+  padding: '8px 10px',
+  fontSize: 13, color: 'var(--ink-1)',
+  background: 'var(--panel)',
+  border: '1px solid var(--line-2)',
+  borderRadius: 8,
+  outline: 'none', fontFamily: 'inherit',
+}
+
+const readonlyBox = {
+  width: '100%', boxSizing: 'border-box',
+  padding: '8px 10px',
+  fontSize: 13,
+  background: 'var(--bg-2)',
+  border: '1px solid var(--line-2)',
+  borderRadius: 8,
+}
+
+const fieldLabel = {
+  display: 'block',
+  fontSize: 11, fontWeight: 600,
+  color: 'var(--ink-3)',
+  marginBottom: 5,
+  letterSpacing: '0.02em',
+}
+
+const primaryBtn = {
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+  padding: '8px 14px', borderRadius: 8,
+  fontSize: 13, fontWeight: 600,
+  background: 'var(--accent)',
+  border: 'none',
+  color: '#FFFFFF',
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+}
+
+const secondaryBtn = {
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+  padding: '8px 14px', borderRadius: 8,
+  fontSize: 13, fontWeight: 500,
+  background: 'transparent',
+  border: '1px solid var(--line-2)',
+  color: 'var(--ink-2)',
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+}
+
+const iconBtn = {
+  width: 30, height: 30, borderRadius: 8,
+  border: '1px solid var(--line)', background: 'var(--panel)',
+  display: 'grid', placeItems: 'center', cursor: 'pointer',
+  color: 'var(--ink-3)',
+}
+
+const linkBtn = {
+  background: 'transparent', border: 'none', cursor: 'pointer',
+  color: 'var(--accent-ink)', fontSize: 12, fontWeight: 600,
+  fontFamily: 'inherit', padding: 0,
 }

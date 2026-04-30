@@ -2,16 +2,11 @@ import { useState, useEffect, useRef } from 'react'
 import { X, ChevronDown, ChevronUp } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useTeam } from '../../lib/TeamContext'
+import logger from '../../lib/logger'
+import { formatPhone, validatePhone, validateEmail } from '../../lib/validate'
 
 const JOB_TYPES = ['Clean Out', 'Auction', 'Both', 'Move', 'Sorting/Organizing', 'Unknown']
 const LEAD_SOURCES = ['Phone Call', 'Email', 'Referral', 'Maximum', 'Website', 'Walk-in', 'Other']
-
-function formatPhone(raw) {
-  const digits = raw.replace(/\D/g, '').slice(0, 10)
-  if (digits.length < 4) return digits
-  if (digits.length < 7) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`
-  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`
-}
 
 export default function NewLeadModal({ initialStage, onClose, onSave, onCreated }) {
   const { members } = useTeam()
@@ -30,7 +25,10 @@ export default function NewLeadModal({ initialStage, onClose, onSave, onCreated 
   const [employees, setEmployees] = useState([])
   const [expanded, setExpanded] = useState(false)
   const [nameError, setNameError] = useState(false)
+  const [phoneError, setPhoneError] = useState(null)
+  const [emailError, setEmailError] = useState(null)
   const [saving, setSaving] = useState(false)
+  const [submitError, setSubmitError] = useState(null)
 
   useEffect(() => {
     nameRef.current?.focus()
@@ -63,7 +61,13 @@ export default function NewLeadModal({ initialStage, onClose, onSave, onCreated 
   }
 
   function handlePhoneBlur() {
-    setPhone(formatPhone(phone))
+    const formatted = formatPhone(phone)
+    setPhone(formatted)
+    setPhoneError(validatePhone(formatted))
+  }
+
+  function handleEmailBlur() {
+    setEmailError(validateEmail(email))
   }
 
   function handlePhoneKeyDown(e) {
@@ -76,7 +80,15 @@ export default function NewLeadModal({ initialStage, onClose, onSave, onCreated 
       nameRef.current?.focus()
       return
     }
+    // Phone/email are optional, but if filled they must validate.
+    const pErr = validatePhone(phone)
+    const eErr = validateEmail(email)
+    if (pErr) { setPhoneError(pErr); return }
+    if (eErr) { setEmailError(eErr); return }
     setNameError(false)
+    setPhoneError(null)
+    setEmailError(null)
+    setSubmitError(null)
     setSaving(true)
     try {
       const leadData = {
@@ -90,11 +102,13 @@ export default function NewLeadModal({ initialStage, onClose, onSave, onCreated 
         job_type: jobType || 'Unknown',
         assigned_to: assignedTo || null,
         status: initialStage || 'New Lead',
-        created_at: new Date().toISOString(),
       }
       const result = await onSave(leadData)
       if (result) onCreated?.(result)
       onClose()
+    } catch (err) {
+      logger.error('Create lead failed', err)
+      setSubmitError(err?.message || 'Failed to create lead. Please try again.')
     } finally {
       setSaving(false)
     }
@@ -159,12 +173,13 @@ export default function NewLeadModal({ initialStage, onClose, onSave, onCreated 
             <input
               type="tel"
               value={phone}
-              onChange={e => setPhone(e.target.value)}
+              onChange={e => { setPhone(formatPhone(e.target.value)); if (phoneError) setPhoneError(null) }}
               onBlur={handlePhoneBlur}
               onKeyDown={handlePhoneKeyDown}
               placeholder="(555) 000-0000"
-              style={inputStyle}
+              style={{ ...inputStyle, borderColor: phoneError ? 'var(--lose)' : undefined }}
             />
+            {phoneError && <p style={inlineError}>{phoneError}</p>}
           </div>
 
           {/* More Details collapsible */}
@@ -189,8 +204,12 @@ export default function NewLeadModal({ initialStage, onClose, onSave, onCreated 
               {/* Email */}
               <div>
                 <label style={fieldLabel}>Email</label>
-                <input type="email" value={email} onChange={e => setEmail(e.target.value)}
-                  placeholder="client@example.com" style={inputStyle} />
+                <input type="email" value={email}
+                  onChange={e => { setEmail(e.target.value); if (emailError) setEmailError(null) }}
+                  onBlur={handleEmailBlur}
+                  placeholder="client@example.com"
+                  style={{ ...inputStyle, borderColor: emailError ? 'var(--lose)' : undefined }} />
+                {emailError && <p style={inlineError}>{emailError}</p>}
               </div>
 
               {/* Address */}
@@ -250,15 +269,31 @@ export default function NewLeadModal({ initialStage, onClose, onSave, onCreated 
 
         {/* Footer */}
         <div style={{
-          display: 'flex', justifyContent: 'flex-end', gap: 8,
-          padding: '12px 20px 16px',
-          borderTop: '1px solid var(--line)',
           flexShrink: 0,
+          borderTop: '1px solid var(--line)',
         }}>
-          <button onClick={onClose} style={ghostBtn}>Cancel</button>
-          <button onClick={handleSubmit} disabled={saving} style={saving ? { ...accentBtn, opacity: 0.6 } : accentBtn}>
-            {saving ? 'Creating…' : 'Create Lead'}
-          </button>
+          {submitError && (
+            <div style={{
+              margin: '12px 20px 0',
+              padding: '8px 12px',
+              fontSize: 12.5,
+              color: 'var(--lose)',
+              background: 'var(--lose-soft)',
+              border: '1px solid color-mix(in oklab, var(--lose) 20%, var(--line))',
+              borderRadius: 8,
+            }}>
+              {submitError}
+            </div>
+          )}
+          <div style={{
+            display: 'flex', justifyContent: 'flex-end', gap: 8,
+            padding: '12px 20px 16px',
+          }}>
+            <button onClick={onClose} style={ghostBtn}>Cancel</button>
+            <button onClick={handleSubmit} disabled={saving} style={saving ? { ...accentBtn, opacity: 0.6 } : accentBtn}>
+              {saving ? 'Creating…' : 'Create Lead'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -315,6 +350,6 @@ const accentBtn = {
   fontSize: 13, fontWeight: 600,
   background: 'var(--accent)',
   border: 'none',
-  color: 'var(--accent-ink)',
+  color: '#FFFFFF',
   cursor: 'pointer',
 }

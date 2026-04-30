@@ -109,10 +109,12 @@ function parseCTSellerCSV(text) {
     return { cat: c.cat, sold: c.sold, rev: c.rev, avg, median, max, bids, views, pctRev: c.rev / totalRev }
   }).sort((a, b) => b.rev - a.rev)
 
-  const topItems = [...items]
+  // Full sorted items list — drives Items-tab pagination, auction drill-down,
+  // and category drill-down. topItems is kept for legacy callers.
+  const allItems = [...items]
     .sort((a, b) => b.price - a.price)
-    .slice(0, 30)
     .map(i => ({ name: i.name, cat: i.cat, price: i.price, bids: i.bids, views: i.views, method: i.method, auction: i.auction }))
+  const topItems = allItems.slice(0, 30)
 
   const saleMap = {}
   for (const item of items) {
@@ -176,6 +178,7 @@ function parseCTSellerCSV(text) {
     categories,
     sales,
     topItems,
+    allItems,
     monthly,
   }
 }
@@ -548,7 +551,26 @@ function estProfitablePct(avgPrice) {
 
 function AuctionsTab({ D }) {
   const [expandedIdx, setExpandedIdx] = useState(null)
-  const sortedRows = [...D.sales].sort((a, b) => b.rev - a.rev)
+  const [auctionSort, setAuctionSort] = useState('end_date')
+
+  const sortedRows = useMemo(() => {
+    const arr = [...D.sales]
+    switch (auctionSort) {
+      case 'total_revenue':
+        return arr.sort((a, b) => (b.rev || 0) - (a.rev || 0))
+      case 'items_sold':
+        return arr.sort((a, b) => (b.items || 0) - (a.items || 0))
+      case 'avg_price':
+        return arr.sort((a, b) => (b.avgPrice || 0) - (a.avgPrice || 0))
+      case 'end_date':
+      default:
+        // Sale-map preserves first-seen-first order from the CSV. The CSV is
+        // chronological per-item, so the LAST encountered auction is the
+        // most recent. Reverse to put the newest first.
+        return arr.slice().reverse()
+    }
+  }, [D.sales, auctionSort])
+
   const top15 = sortedRows.slice(0, 15)
   const showing15 = sortedRows.length > 15
 
@@ -579,6 +601,26 @@ function AuctionsTab({ D }) {
         <StatMini label="Gross Revenue" value={`$${(totalRev / 1000).toFixed(0)}k`} suffix={`${totalItems.toLocaleString()} items`} />
         <StatMini label="Avg Paid Rate" value={`${(avgPaid * 100).toFixed(0)}%`} suffix="across auctions" />
         <StatMini label="Buyer's Premium" value={`$${(totalBP / 1000).toFixed(0)}k`} suffix="captured" />
+      </div>
+
+      {/* Sort controls */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        <span style={{ fontSize: 11.5, color: 'var(--ink-3)', fontWeight: 500 }}>Sort:</span>
+        <select
+          value={auctionSort}
+          onChange={e => setAuctionSort(e.target.value)}
+          style={{
+            padding: '6px 10px', borderRadius: 8,
+            border: '1px solid var(--line)', background: 'var(--panel)',
+            fontSize: 12, color: 'var(--ink-2)', fontFamily: 'inherit', fontWeight: 500,
+            cursor: 'pointer',
+          }}
+        >
+          <option value="end_date">Most Recent</option>
+          <option value="total_revenue">Highest Revenue</option>
+          <option value="items_sold">Most Items</option>
+          <option value="avg_price">Best Avg Price</option>
+        </select>
       </div>
 
       {/* Revenue bar chart */}
@@ -612,13 +654,13 @@ function AuctionsTab({ D }) {
             const name = r.title.replace(/ Online Auction.*$/, '').replace(/ - Ends.*$/, '').replace(/–.*$/, '').trim()
             const ep = estProfitablePct(r.avgPrice || 0)
             const isExpanded = expandedIdx === i
-            // Find matching items from D.topItems
-            const matchItems = (D.topItems || []).filter(it => {
-              const auc = (it.auction || '').toLowerCase()
-              const title = r.title.toLowerCase()
-              const shortTitle = name.toLowerCase()
-              return title.includes(auc) || shortTitle.includes(auc) || auc.includes(shortTitle.split(' ').slice(0, 3).join(' '))
-            }).sort((a, b) => b.price - a.price)
+            // Match by EXACT auction title (which is what saleMap is keyed on).
+            // Pull from the full items list so the drill-down shows every item,
+            // not just the global top-30. Sort descending by sale_price.
+            const sourceItems = D.allItems || D.topItems || []
+            const matchItems = sourceItems
+              .filter(it => (it.auction || '').trim() === r.title.trim())
+              .sort((a, b) => b.price - a.price)
             const aboveThreshold = matchItems.filter(it => it.price >= PROFIT_THRESHOLD)
             const belowThreshold = matchItems.filter(it => it.price < PROFIT_THRESHOLD)
 
@@ -644,24 +686,38 @@ function AuctionsTab({ D }) {
                 {isExpanded && (
                   <div style={{ padding: '14px 20px', background: 'var(--bg-2)', borderBottom: '1px solid var(--line-2)' }}>
                     {matchItems.length === 0 ? (
-                      <div style={{ fontSize: 12.5, color: 'var(--ink-4)' }}>No item-level data available for this auction.</div>
+                      <div style={{ fontSize: 12.5, color: 'var(--ink-4)' }}>
+                        {D.allItems
+                          ? 'No items matched this auction title.'
+                          : 'Sample data only includes the top 30 items globally — import a CTSeller CSV to see every item per auction.'}
+                      </div>
                     ) : (
                       <>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-2)', marginBottom: 10 }}>
-                          {aboveThreshold.length} items above ${PROFIT_THRESHOLD} · {belowThreshold.length} items below · avg ${Math.round(matchItems.reduce((s, it) => s + it.price, 0) / matchItems.length)}
+                        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink-1)', marginBottom: 4 }}>
+                          {matchItems.length} item{matchItems.length !== 1 ? 's' : ''} in this auction
+                        </div>
+                        <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--ink-3)', marginBottom: 12 }}>
+                          {aboveThreshold.length} above ${PROFIT_THRESHOLD} · {belowThreshold.length} below · avg ${Math.round(matchItems.reduce((s, it) => s + it.price, 0) / matchItems.length)}
                         </div>
                         {matchItems.map((it, j) => {
-                          const isThresholdLine = j > 0 && matchItems[j - 1].price >= PROFIT_THRESHOLD && it.price < PROFIT_THRESHOLD
+                          const isFirstBelow = j > 0 && matchItems[j - 1].price >= PROFIT_THRESHOLD && it.price < PROFIT_THRESHOLD
+                          const below = it.price < PROFIT_THRESHOLD
                           return (
                             <div key={j}>
-                              {isThresholdLine && (
-                                <div style={{ borderTop: `1.5px dashed var(--lose)`, margin: '6px 0', position: 'relative' }}>
-                                  <span style={{ position: 'absolute', left: 0, top: -8, fontSize: 10, color: 'var(--lose)', background: 'var(--bg-2)', paddingRight: 6 }}>
+                              {isFirstBelow && (
+                                <div style={{ borderTop: `1.5px dashed var(--lose)`, margin: '10px 0 6px', position: 'relative' }}>
+                                  <span style={{ position: 'absolute', left: 0, top: -8, fontSize: 10, fontWeight: 700, color: 'var(--lose)', background: 'var(--bg-2)', paddingRight: 6 }}>
                                     — ${PROFIT_THRESHOLD} threshold —
                                   </span>
                                 </div>
                               )}
-                              <div style={{ display: 'grid', gridTemplateColumns: '2fr 100px 60px 90px', gap: 10, padding: '6px 0', fontSize: 12, alignItems: 'center' }}>
+                              <div style={{
+                                display: 'grid', gridTemplateColumns: '2fr 100px 60px 90px',
+                                gap: 10, padding: '6px 8px', fontSize: 12, alignItems: 'center',
+                                background: below ? 'rgba(245,158,11,0.06)' : 'transparent',
+                                borderRadius: 6,
+                                opacity: below ? 0.6 : 1,
+                              }}>
                                 <span style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.name}</span>
                                 <span style={{ fontWeight: 600, color: it.price >= PROFIT_THRESHOLD ? 'var(--win)' : 'var(--lose)', fontVariantNumeric: 'tabular-nums' }}>${it.price.toLocaleString()}</span>
                                 <span style={{ color: 'var(--ink-3)', fontVariantNumeric: 'tabular-nums' }}>{it.bids} bids</span>
@@ -749,7 +805,11 @@ function CategoriesTab({ D, onSwitchToItems, onFilterItems }) {
             const rec = getRecommendation(c)
             const isProfitable = (c.avg || 0) >= PROFIT_THRESHOLD
             const isExpanded = expandedCat === c.cat
-            const catItems = (D.topItems || []).filter(it => it.cat === c.cat).sort((a, b) => b.price - a.price)
+            // Pull from the full items list (when CSV has been imported) so the
+            // drill-down's top-5 reflects every item in the category, not just
+            // the global top-30 sample.
+            const catSource = D.allItems || D.topItems || []
+            const catItems = catSource.filter(it => it.cat === c.cat).sort((a, b) => b.price - a.price)
             const catAbove = catItems.filter(it => it.price >= 200).length
             const catMid = catItems.filter(it => it.price >= PROFIT_THRESHOLD && it.price < 200).length
             const catBelow = catItems.filter(it => it.price < PROFIT_THRESHOLD).length
@@ -825,31 +885,50 @@ function CategoriesTab({ D, onSwitchToItems, onFilterItems }) {
 
 // ── Items Tab ──────────────────────────────────────────────────
 
+const ITEMS_PAGE_SIZE = 50
+
 function ItemsTab({ D, categoryFilter, onClearFilter }) {
   const [query, setQuery] = useState('')
+  const [debouncedQuery, setDebouncedQuery] = useState('')
   const [method, setMethod] = useState('all')
   const [filter, setFilter] = useState('all')
+  const [page, setPage] = useState(0)
+
+  // 300ms debounce on search
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(query), 300)
+    return () => clearTimeout(t)
+  }, [query])
+
+  // Reset to page 0 whenever any filter changes
+  useEffect(() => {
+    setPage(0)
+  }, [debouncedQuery, method, filter, categoryFilter])
+
+  // Source = full items if available (CSV import); else fall back to top-30 sample.
+  const sourceItems = D.allItems || D.topItems
 
   const rows = useMemo(() => {
-    let list = D.topItems
-    // Apply category filter from drill-down
-    if (categoryFilter) {
-      list = list.filter(i => i.cat === categoryFilter)
-    }
-    // Apply price/engagement filter
-    if (filter === 'high') list = list.filter(i => i.price >= 200)
+    let list = sourceItems
+    if (categoryFilter)            list = list.filter(i => i.cat === categoryFilter)
+    if (filter === 'high')         list = list.filter(i => i.price >= 200)
     else if (filter === 'profitable') list = list.filter(i => i.price >= PROFIT_THRESHOLD)
-    else if (filter === 'below') list = list.filter(i => i.price < PROFIT_THRESHOLD)
+    else if (filter === 'below')   list = list.filter(i => i.price < PROFIT_THRESHOLD)
     else if (filter === 'mostbids') list = [...list].sort((a, b) => (b.bids || 0) - (a.bids || 0))
-    // Method filter
     if (method !== 'all') list = list.filter(i => (i.method || '').toLowerCase() === method)
-    // Search
-    if (query) {
-      const q = query.toLowerCase()
+    if (debouncedQuery) {
+      const q = debouncedQuery.toLowerCase()
       list = list.filter(i => i.name.toLowerCase().includes(q) || (i.cat || '').toLowerCase().includes(q))
     }
     return list
-  }, [D.topItems, query, method, filter, categoryFilter])
+  }, [sourceItems, debouncedQuery, method, filter, categoryFilter])
+
+  const totalCount = rows.length
+  const pageCount = Math.max(1, Math.ceil(totalCount / ITEMS_PAGE_SIZE))
+  const safePage = Math.min(page, pageCount - 1)
+  const pageRows = rows.slice(safePage * ITEMS_PAGE_SIZE, safePage * ITEMS_PAGE_SIZE + ITEMS_PAGE_SIZE)
+  const showingFrom = totalCount === 0 ? 0 : safePage * ITEMS_PAGE_SIZE + 1
+  const showingTo   = Math.min(totalCount, (safePage + 1) * ITEMS_PAGE_SIZE)
 
   return (
     <div style={{ padding: '0 28px 36px' }}>
@@ -888,27 +967,74 @@ function ItemsTab({ D, categoryFilter, onClearFilter }) {
           <div style={{ display: 'grid', gridTemplateColumns: '36px 2fr 1.1fr 100px 60px 70px 90px', gap: 10, padding: '10px 16px', fontSize: 10.5, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600, borderBottom: '1px solid var(--line)', background: 'var(--bg-2)' }}>
             <span>#</span><span>Item</span><span>Category</span><span>Sale Price</span><span>Bids</span><span>Views</span><span>Method</span>
           </div>
-          {rows.slice(0, 100).map((it, i) => (
-            <div key={i} style={{ display: 'grid', gridTemplateColumns: '36px 2fr 1.1fr 100px 60px 70px 90px', gap: 10, padding: '11px 16px', alignItems: 'center', fontSize: 12.5, borderBottom: i < rows.length - 1 ? '1px solid var(--line-2)' : 'none' }}
-              onMouseOver={e => e.currentTarget.style.background = 'var(--bg-2)'}
-              onMouseOut={e => e.currentTarget.style.background = 'transparent'}>
-              <span style={{ fontSize: 11, color: 'var(--ink-4)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{i + 1}</span>
-              <div style={{ overflow: 'hidden' }}>
-                <div style={{ fontWeight: 600, color: 'var(--ink-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.name}</div>
-                <div style={{ fontSize: 11, color: 'var(--ink-4)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.auction}</div>
-              </div>
-              <span style={{ fontSize: 11.5, color: 'var(--ink-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.cat}</span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
-                <span style={{ fontSize: 8, color: it.price >= PROFIT_THRESHOLD ? 'var(--win)' : 'var(--lose)' }}>●</span>
-                <span style={{ color: it.price >= PROFIT_THRESHOLD ? 'var(--win)' : 'var(--ink-2)' }}>${it.price.toLocaleString()}</span>
-              </span>
-              <span style={{ color: 'var(--ink-2)', fontVariantNumeric: 'tabular-nums' }}>{it.bids}</span>
-              <span style={{ color: 'var(--ink-3)', fontVariantNumeric: 'tabular-nums' }}>{it.views}</span>
-              <span style={{ fontSize: 10.5, fontWeight: 600, padding: '2px 8px', borderRadius: 999, background: it.method === 'pickup' ? 'var(--b-auction-bg, var(--warn-soft))' : 'var(--b-both-bg, var(--accent-soft))', color: it.method === 'pickup' ? 'var(--b-auction-fg, var(--warn))' : 'var(--b-both-fg, var(--accent-ink))', textTransform: 'capitalize', justifySelf: 'start' }}>
-                {it.method}
-              </span>
+          {pageRows.length === 0 ? (
+            <div style={{ padding: 32, textAlign: 'center', color: 'var(--ink-4)', fontSize: 13 }}>
+              No items match these filters.
             </div>
-          ))}
+          ) : pageRows.map((it, i) => {
+            const absoluteIdx = safePage * ITEMS_PAGE_SIZE + i + 1
+            return (
+              <div key={`${absoluteIdx}-${it.name}`} style={{ display: 'grid', gridTemplateColumns: '36px 2fr 1.1fr 100px 60px 70px 90px', gap: 10, padding: '11px 16px', alignItems: 'center', fontSize: 12.5, borderBottom: i < pageRows.length - 1 ? '1px solid var(--line-2)' : 'none' }}
+                onMouseOver={e => e.currentTarget.style.background = 'var(--bg-2)'}
+                onMouseOut={e => e.currentTarget.style.background = 'transparent'}>
+                <span style={{ fontSize: 11, color: 'var(--ink-4)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{absoluteIdx}</span>
+                <div style={{ overflow: 'hidden' }}>
+                  <div style={{ fontWeight: 600, color: 'var(--ink-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.name}</div>
+                  <div style={{ fontSize: 11, color: 'var(--ink-4)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.auction}</div>
+                </div>
+                <span style={{ fontSize: 11.5, color: 'var(--ink-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.cat}</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+                  <span style={{ fontSize: 8, color: it.price >= PROFIT_THRESHOLD ? 'var(--win)' : 'var(--lose)' }}>●</span>
+                  <span style={{ color: it.price >= PROFIT_THRESHOLD ? 'var(--win)' : 'var(--ink-2)' }}>${it.price.toLocaleString()}</span>
+                </span>
+                <span style={{ color: 'var(--ink-2)', fontVariantNumeric: 'tabular-nums' }}>{it.bids}</span>
+                <span style={{ color: 'var(--ink-3)', fontVariantNumeric: 'tabular-nums' }}>{it.views}</span>
+                <span style={{ fontSize: 10.5, fontWeight: 600, padding: '2px 8px', borderRadius: 999, background: it.method === 'pickup' ? 'var(--b-auction-bg, var(--warn-soft))' : 'var(--b-both-bg, var(--accent-soft))', color: it.method === 'pickup' ? 'var(--b-auction-fg, var(--warn))' : 'var(--b-both-fg, var(--accent-ink))', textTransform: 'capitalize', justifySelf: 'start' }}>
+                  {it.method}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Pagination controls */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 12, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>
+          {totalCount === 0
+            ? 'No items'
+            : `Showing ${showingFrom.toLocaleString()}-${showingTo.toLocaleString()} of ${totalCount.toLocaleString()} items`}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button
+            onClick={() => setPage(p => Math.max(0, p - 1))}
+            disabled={safePage === 0}
+            style={{
+              padding: '6px 12px', borderRadius: 8,
+              border: '1px solid var(--line)', background: 'var(--panel)',
+              color: 'var(--ink-2)', fontSize: 12, fontWeight: 600,
+              cursor: safePage === 0 ? 'not-allowed' : 'pointer',
+              opacity: safePage === 0 ? 0.5 : 1, fontFamily: 'inherit',
+            }}
+          >
+            ← Previous
+          </button>
+          <span style={{ fontSize: 12, color: 'var(--ink-2)', fontVariantNumeric: 'tabular-nums', minWidth: 110, textAlign: 'center' }}>
+            Page {safePage + 1} of {pageCount}
+          </span>
+          <button
+            onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))}
+            disabled={safePage >= pageCount - 1}
+            style={{
+              padding: '6px 12px', borderRadius: 8,
+              border: '1px solid var(--line)', background: 'var(--panel)',
+              color: 'var(--ink-2)', fontSize: 12, fontWeight: 600,
+              cursor: safePage >= pageCount - 1 ? 'not-allowed' : 'pointer',
+              opacity: safePage >= pageCount - 1 ? 0.5 : 1, fontFamily: 'inherit',
+            }}
+          >
+            Next →
+          </button>
         </div>
       </div>
     </div>

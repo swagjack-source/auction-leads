@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { createPortal } from 'react-dom'
 import { Search, X, Bell, CalendarDays, Send, TrendingUp, ArrowUpDown, ChevronDown, Upload, MapPin, ExternalLink } from 'lucide-react'
 import * as XLSX from 'xlsx'
@@ -9,7 +10,7 @@ import LeadDrawer from '../components/Pipeline/LeadDrawer'
 import StageTransitionModal, { needsTransitionPrompt } from '../components/Pipeline/StageTransitionModal'
 import NewLeadModal from '../components/Pipeline/NewLeadModal'
 import ErrorBoundary from '../components/ErrorBoundary'
-import { ACTIVE_STAGES, OUTCOME_STAGES } from '../lib/constants'
+import { ACTIVE_STAGES, OUTCOME_STAGES, PIPELINE_STAGES } from '../lib/constants'
 import { supabase } from '../lib/supabase'
 import PipelineListView from '../components/Pipeline/PipelineListView'
 import PipelineCalendarView from '../components/Pipeline/PipelineCalendarView'
@@ -81,15 +82,26 @@ function BoardHeader({ jobFilter, setJobFilter, outcomeFilter, setOutcomeFilter,
         background: 'var(--panel)', border: '1px solid var(--line)',
         borderRadius: 10, padding: 2, boxShadow: 'var(--shadow-1)',
       }}>
-        {['Board', 'List', 'Calendar', 'Map'].map(v => (
-          <button key={v} onClick={() => setView(v.toLowerCase())} style={{
-            padding: '5px 12px', borderRadius: 8, border: 'none', cursor: 'pointer',
-            fontSize: 12, fontWeight: 600,
-            background: view === v.toLowerCase() ? 'var(--accent-soft)' : 'transparent',
-            color: view === v.toLowerCase() ? 'var(--accent-ink)' : 'var(--ink-3)',
-            fontFamily: 'inherit',
-          }}>{v}</button>
-        ))}
+        {['Board', 'List', 'Calendar', 'Map'].map(v => {
+          const isMap = v === 'Map'
+          return (
+            <button
+              key={v}
+              onClick={() => { if (!isMap) setView(v.toLowerCase()) }}
+              disabled={isMap}
+              title={isMap ? 'Map view — coming soon' : undefined}
+              style={{
+                padding: '5px 12px', borderRadius: 8, border: 'none',
+                cursor: isMap ? 'not-allowed' : 'pointer',
+                fontSize: 12, fontWeight: 600,
+                background: view === v.toLowerCase() ? 'var(--accent-soft)' : 'transparent',
+                color: isMap ? 'var(--ink-4)' : (view === v.toLowerCase() ? 'var(--accent-ink)' : 'var(--ink-3)'),
+                opacity: isMap ? 0.4 : 1,
+                fontFamily: 'inherit',
+              }}
+            >{v}</button>
+          )
+        })}
       </div>
 
       <div style={{ width: 1, height: 18, background: 'var(--line)' }} />
@@ -369,12 +381,15 @@ export default function Pipeline() {
   const [newLeadStage, setNewLeadStage] = useState('New Lead')
   const [pendingTransition, setPendingTransition] = useState(null) // { lead, toStage }
 
-  const [view, setView] = useState('board')
+  const [view, _setView] = useState('board')
+  // Wrapper that bounces 'map' → 'board' (Map view is disabled).
+  const setView = useCallback(v => _setView(v === 'map' ? 'board' : v), [])
   const [search, setSearch] = useState('')
   const [jobFilter, setJobFilter] = useState('All')
   const [outcomeFilter, setOutcomeFilter] = useState(null)
   const [selectedMember, setSelectedMember] = useState(null)
   const [sortBy, setSortBy] = useState('date_desc')
+  const [transitionError, setTransitionError] = useState(null)
   // drag state — only used for overlay render + placeholder detection
   const [drag, setDrag] = useState(null)      // { id, lead, w, h }
   const [hoverCol, setHoverCol] = useState(null)
@@ -390,8 +405,39 @@ export default function Pipeline() {
   const boardRef = useRef(null)
   const importFileRef = useRef(null)
 
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [statusFilter, setStatusFilter] = useState(null)
+
 
   useEffect(() => { fetchLeads() }, [])
+
+  // Honour ?action=newLead and ?filter=<status>|stale on first mount.
+  useEffect(() => {
+    const action = searchParams.get('action')
+    const filter = searchParams.get('filter')
+    let consumed = false
+    if (action === 'newLead') {
+      setIsNewLead(true)
+      setNewLeadStage('New Lead')
+      consumed = true
+    }
+    if (filter) {
+      if (filter === 'stale') {
+        setQuickFilter('stale')
+      } else {
+        // status name e.g. 'New Lead'
+        setStatusFilter(filter)
+      }
+      consumed = true
+    }
+    if (consumed) {
+      const next = new URLSearchParams(searchParams)
+      next.delete('action')
+      next.delete('filter')
+      setSearchParams(next, { replace: true })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     const btn = document.getElementById('global-new-lead')
@@ -441,8 +487,16 @@ export default function Pipeline() {
         setLeads(ls => ls.map(l => l.id === lead.id ? prevLead : l))
         setDrawerLead(prev => prev?.id === lead.id ? prevLead : prev)
       }
+      setTransitionError(`Could not move lead to ${newStatus}: ${error.message}`)
     }
   }, []) // setLeads/setDrawerLead are stable; supabase is module-level
+
+  // Auto-dismiss transient error after 6s
+  useEffect(() => {
+    if (!transitionError) return
+    const t = setTimeout(() => setTransitionError(null), 6000)
+    return () => clearTimeout(t)
+  }, [transitionError])
 
   const handleSave = useCallback(async (updated) => {
     const { _scoreDetails, ...raw } = updated
@@ -568,6 +622,7 @@ export default function Pipeline() {
           !l.phone?.includes(search)) return false
       if (jobFilter !== 'All' && l.job_type !== jobFilter) return false
       if (outcomeFilter && l.status !== outcomeFilter) return false
+      if (statusFilter && l.status !== statusFilter) return false
       if (selectedMember && l.assigned_to !== selectedMember) return false
       if (quickFilter === 'stale') {
         if (['Won', 'Lost', 'Backlog'].includes(l.status)) return false
@@ -588,7 +643,7 @@ export default function Pipeline() {
     if (sortBy === 'value')     out = [...out].sort((a, b) => (b._scoreDetails?.recommendedBid || 0) - (a._scoreDetails?.recommendedBid || 0))
     if (sortBy === 'name')      out = [...out].sort((a, b) => a.name.localeCompare(b.name))
     return out
-  }, [leads, search, jobFilter, outcomeFilter, selectedMember, sortBy, quickFilter])
+  }, [leads, search, jobFilter, outcomeFilter, statusFilter, selectedMember, sortBy, quickFilter])
 
   const grouped = useMemo(() => {
     const map = {}
@@ -665,7 +720,15 @@ export default function Pipeline() {
         const el = document.elementFromPoint(e.clientX, e.clientY)
         const targetStage = el?.closest('[data-stage]')?.dataset.stage
         if (targetStage && p && targetStage !== p.lead.status) {
-          if (needsTransitionPrompt(targetStage)) {
+          // Backward drag: skip the contextual prompt and just move the card.
+          // Lost / Backlog ALWAYS prompt — they capture loss reason / follow-up
+          // date regardless of direction.
+          const oldIdx = PIPELINE_STAGES.indexOf(p.lead.status)
+          const newIdx = PIPELINE_STAGES.indexOf(targetStage)
+          const isBackward = oldIdx >= 0 && newIdx >= 0 && newIdx < oldIdx
+          const alwaysPrompt = targetStage === 'Lost' || targetStage === 'Backlog'
+
+          if (needsTransitionPrompt(targetStage) && (!isBackward || alwaysPrompt)) {
             // Show contextual modal before committing the move
             setPendingTransition({ lead: p.lead, toStage: targetStage })
           } else {
@@ -848,6 +911,59 @@ export default function Pipeline() {
         sortBy={sortBy} setSortBy={setSortBy}
         search={search} setSearch={setSearch}
       />
+
+      {/* Transition error banner */}
+      {transitionError && (
+        <div style={{
+          padding: '8px 20px',
+          background: 'var(--lose-soft)',
+          borderBottom: '1px solid color-mix(in oklab, var(--lose) 25%, var(--line))',
+          color: 'var(--lose)',
+          fontSize: 12.5, fontWeight: 500,
+          display: 'flex', alignItems: 'center', gap: 10,
+          flexShrink: 0,
+        }}>
+          <span style={{ flex: 1 }}>{transitionError}</span>
+          <button
+            onClick={() => setTransitionError(null)}
+            style={{ background: 'transparent', border: 'none', color: 'var(--lose)', cursor: 'pointer', display: 'inline-flex', padding: 0 }}
+            aria-label="Dismiss"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
+      {/* Status filter chip (from ?filter=<status>) */}
+      {statusFilter && (
+        <div style={{
+          padding: '6px 20px',
+          background: 'var(--accent-soft)',
+          borderBottom: '1px solid var(--accent)30',
+          display: 'flex', alignItems: 'center', gap: 8,
+          flexShrink: 0,
+        }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent-ink)' }}>
+            Filtered: {statusFilter}
+          </span>
+          <span style={{ fontSize: 12, color: 'var(--accent-ink)', opacity: 0.6 }}>
+            · {filtered.length} {filtered.length === 1 ? 'lead' : 'leads'}
+          </span>
+          <button
+            onClick={() => setStatusFilter(null)}
+            title="Clear filter"
+            style={{
+              marginLeft: 4, display: 'inline-flex', alignItems: 'center', gap: 4,
+              padding: '2px 8px', borderRadius: 999,
+              border: '1px solid var(--accent)50', background: 'var(--accent)15',
+              color: 'var(--accent-ink)', fontSize: 11, fontWeight: 600,
+              cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            <X size={10} strokeWidth={2.5} /> Clear
+          </button>
+        </div>
+      )}
 
       {/* Quick-filter chip */}
       {quickFilter && (

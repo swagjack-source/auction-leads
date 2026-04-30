@@ -9,8 +9,6 @@
  */
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-// Accepts: +1 (303) 555-0100 | 303-555-0100 | 3035550100 | +13035550100
-const PHONE_RE = /^[+]?[\d\s\-().]{7,20}$/
 
 /**
  * Validates an email address.
@@ -25,13 +23,37 @@ export function validateEmail(value) {
 }
 
 /**
- * Validates a phone number (loose — allows various formats).
+ * Strip all non-digit characters from a phone string.
+ * @param {string} value
+ * @returns {string}
+ */
+export function phoneDigits(value) {
+  return String(value || '').replace(/\D/g, '')
+}
+
+/**
+ * Format a phone string as (XXX) XXX-XXXX as the user types.
+ * Returns the raw input if fewer than 4 digits.
+ * @param {string} value
+ * @returns {string}
+ */
+export function formatPhone(value) {
+  const digits = phoneDigits(value).slice(0, 10)
+  if (digits.length <= 3)  return digits
+  if (digits.length <= 6)  return `(${digits.slice(0, 3)}) ${digits.slice(3)}`
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`
+}
+
+/**
+ * Validates a phone number — must be exactly 10 digits when provided.
+ * Returns null when empty (phone is optional on most forms).
  * @param {string} value
  * @returns {string|null} error message, or null if valid
  */
 export function validatePhone(value) {
   if (!value || !value.trim()) return null          // Optional
-  if (!PHONE_RE.test(value.trim())) return 'Enter a valid phone number'
+  const digits = phoneDigits(value)
+  if (digits.length !== 10) return 'Enter a 10-digit phone number'
   return null
 }
 

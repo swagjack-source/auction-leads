@@ -3,7 +3,7 @@ import { Plus, Search, Trash2, X, Phone, Mail, MapPin, Building2, Pencil, Star, 
 import { supabase } from '../lib/supabase'
 import { CONTACT_TYPES } from '../lib/constants'
 import { useAuth } from '../lib/AuthContext'
-import { validateRequired, validateEmail, validatePhone, firstError } from '../lib/validate'
+import { validateRequired, validateEmail, validatePhone, formatPhone, firstError } from '../lib/validate'
 import { useSupabaseQuery } from '../lib/useSupabaseQuery'
 
 const TYPE_META = {
@@ -28,6 +28,11 @@ const inputStyle = {
   fontFamily: 'inherit',
 }
 
+const fieldErrText = {
+  fontSize: 12, color: 'var(--lose)',
+  marginTop: 4, lineHeight: 1.3,
+}
+
 const EMPTY = { name: '', company: '', type: 'Partner', phone: '', email: '', address: '', notes: '' }
 
 function ContactModal({ contact, onClose, onSave, onSaveAnother }) {
@@ -35,17 +40,32 @@ function ContactModal({ contact, onClose, onSave, onSaveAnother }) {
   const [form, setForm] = useState({ ...EMPTY, ...contact })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
+  const [fieldErrors, setFieldErrors] = useState({}) // { name, phone, email }
   const initials = form.name ? form.name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase() : '?'
   const meta = TYPE_META[form.type] || { color: '#64748b' }
 
-  function set(k, v) { setForm(f => ({ ...f, [k]: v })) }
+  function set(k, v) {
+    setForm(f => ({ ...f, [k]: v }))
+    // Clear field-level error as the user starts typing again
+    if (fieldErrors[k]) setFieldErrors(fe => ({ ...fe, [k]: null }))
+  }
+  function blurField(k) {
+    let err = null
+    if (k === 'name')  err = validateRequired(form.name, 'Name')
+    if (k === 'phone') err = validatePhone(form.phone)
+    if (k === 'email') err = validateEmail(form.email)
+    setFieldErrors(fe => ({ ...fe, [k]: err }))
+  }
 
   async function doSave() {
-    const err = firstError(
-      validateRequired(form.name, 'Name'),
-      validateEmail(form.email),
-      validatePhone(form.phone),
-    )
+    // Surface every field's error inline before blocking submit
+    const next = {
+      name:  validateRequired(form.name, 'Name'),
+      phone: validatePhone(form.phone),
+      email: validateEmail(form.email),
+    }
+    setFieldErrors(next)
+    const err = firstError(next.name, next.phone, next.email)
     if (err) { setError(err); return null }
     setSaving(true); setError(null)
     try { await onSave(form); return true }
@@ -80,18 +100,19 @@ function ContactModal({ contact, onClose, onSave, onSaveAnother }) {
 
         {/* Form body with preview */}
         <div style={{ display: 'flex', gap: 0 }}>
-          {/* Avatar preview */}
-          <div style={{ padding: '20px 18px', borderRight: '1px solid var(--line-2)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, minWidth: 100 }}>
+          {/* Avatar preview — fixed width so name input doesn't reflow the layout */}
+          <div style={{ padding: '20px 14px', borderRight: '1px solid var(--line-2)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, width: 132, flexShrink: 0, boxSizing: 'border-box' }}>
             <div style={{
               width: 64, height: 64, borderRadius: '50%',
               background: `${meta.color}20`, border: `2px solid ${meta.color}40`,
               color: meta.color, fontSize: 22, fontWeight: 700,
               display: 'grid', placeItems: 'center',
+              flexShrink: 0,
             }}>{initials}</div>
-            <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--ink-2)', textAlign: 'center', lineHeight: 1.3 }}>
+            <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--ink-2)', textAlign: 'center', lineHeight: 1.3, width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {form.name || 'Contact name'}
             </div>
-            <div style={{ fontSize: 11, color: 'var(--ink-4)', textAlign: 'center' }}>{form.company || 'Role'}</div>
+            <div style={{ fontSize: 11, color: 'var(--ink-4)', textAlign: 'center', width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{form.company || 'Role'}</div>
           </div>
 
           {/* Fields */}
@@ -99,7 +120,11 @@ function ContactModal({ contact, onClose, onSave, onSaveAnother }) {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div>
                 <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-3)', display: 'block', marginBottom: 5 }}>Full name <span style={{ color: 'var(--lose)' }}>*</span></label>
-                <input value={form.name} onChange={e => set('name', e.target.value)} placeholder="First Last" style={inputStyle} />
+                <input value={form.name} onChange={e => set('name', e.target.value)}
+                  onBlur={() => blurField('name')}
+                  placeholder="First Last"
+                  style={{ ...inputStyle, borderColor: fieldErrors.name ? 'var(--lose)' : undefined }} />
+                {fieldErrors.name && <div style={fieldErrText}>{fieldErrors.name}</div>}
               </div>
               <div>
                 <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-3)', display: 'block', marginBottom: 5 }}>Category <span style={{ color: 'var(--lose)' }}>*</span></label>
@@ -110,8 +135,8 @@ function ContactModal({ contact, onClose, onSave, onSaveAnother }) {
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div>
-                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-3)', display: 'block', marginBottom: 5 }}>Role / title</label>
-                <input value={form.address} onChange={e => set('address', e.target.value)} placeholder="e.g. Move-in Coordinator" style={inputStyle} />
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-3)', display: 'block', marginBottom: 5 }}>Address</label>
+                <input value={form.address} onChange={e => set('address', e.target.value)} placeholder="123 Main St, City, State" style={inputStyle} />
               </div>
               <div>
                 <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-3)', display: 'block', marginBottom: 5 }}>Organization</label>
@@ -121,16 +146,21 @@ function ContactModal({ contact, onClose, onSave, onSaveAnother }) {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div>
                 <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-3)', display: 'block', marginBottom: 5 }}>Phone</label>
-                <input value={form.phone} onChange={e => set('phone', e.target.value)} placeholder="(555) 555-0100" style={inputStyle} />
+                <input value={form.phone}
+                  onChange={e => set('phone', formatPhone(e.target.value))}
+                  onBlur={() => blurField('phone')}
+                  placeholder="(555) 555-0100"
+                  style={{ ...inputStyle, borderColor: fieldErrors.phone ? 'var(--lose)' : undefined }} />
+                {fieldErrors.phone && <div style={fieldErrText}>{fieldErrors.phone}</div>}
               </div>
               <div>
                 <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-3)', display: 'block', marginBottom: 5 }}>Email</label>
-                <input type="email" value={form.email} onChange={e => set('email', e.target.value)} placeholder="name@example.com" style={inputStyle} />
+                <input type="email" value={form.email} onChange={e => set('email', e.target.value)}
+                  onBlur={() => blurField('email')}
+                  placeholder="name@example.com"
+                  style={{ ...inputStyle, borderColor: fieldErrors.email ? 'var(--lose)' : undefined }} />
+                {fieldErrors.email && <div style={fieldErrText}>{fieldErrors.email}</div>}
               </div>
-            </div>
-            <div>
-              <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-3)', display: 'block', marginBottom: 5 }}>City</label>
-              <input value={form.notes} onChange={e => set('notes', e.target.value)} placeholder="City, State" style={inputStyle} />
             </div>
             <div>
               <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-3)', display: 'block', marginBottom: 5 }}>Notes</label>

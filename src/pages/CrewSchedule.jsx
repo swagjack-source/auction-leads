@@ -51,13 +51,32 @@ function getSundayOfWeek(dateStr) {
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
+// Muted job-type palette — bg/text pairs used on pills, badges, and grid bars.
 const JOB_COLORS = {
-  'Clean Out': '#3B82F6',
-  'Auction': '#7F77DD',
-  'Both': '#6366F1',
-  'Move': '#1D9E75',
-  'Sorting/Organizing': '#D97706',
-  'In-Person Sale': '#C2410C',
+  'Clean Out':           { bg: '#E6F1FB', text: '#0C447C', accent: '#0C447C' },
+  'Auction':             { bg: '#EEEDFE', text: '#3C3489', accent: '#3C3489' },
+  'Both':                { bg: '#E6E0FA', text: '#4338CA', accent: '#4338CA' },
+  'Move':                { bg: '#E1F5EE', text: '#085041', accent: '#085041' },
+  'Sorting/Organizing':  { bg: '#FAEEDA', text: '#633806', accent: '#633806' },
+  'In-Person Sale':      { bg: '#FAECE7', text: '#712B13', accent: '#712B13' },
+}
+function jobChip(type) {
+  return JOB_COLORS[type] || { bg: 'var(--bg-2)', text: 'var(--ink-2)', accent: 'var(--ink-3)' }
+}
+
+// Section accent colors for time-period group headers.
+const SECTION_ACCENTS = {
+  'This Week':   '#3B82F6',
+  'Next Week':   '#7F77DD',
+  'Upcoming':    '#A8A29E',
+  'Needs Dates': '#F59E0B',
+}
+
+// Staffing palette — used for status dots, text, and card left border.
+const STAFFING = {
+  none:    { dot: '#EF4444', text: '#791F1F', border: '#EF4444', label: 'Needs crew' },
+  partial: { dot: '#F59E0B', text: '#633806', border: '#F59E0B', label: 'Partially staffed' },
+  full:    { dot: '#22C55E', text: '#27500A', border: '#22C55E', label: 'Fully staffed' },
 }
 
 const AVATAR_COLORS = ['#3B82F6','#7F77DD','#1D9E75','#D97706','#C2410C','#6366F1','#0891B2','#DB2777']
@@ -224,25 +243,28 @@ function SkeletonBox({ height = 120 }) {
   )
 }
 
-function SectionHeader({ label, count, onToggle, expanded }) {
+function SectionHeader({ label, dateRange, count, onToggle, expanded }) {
+  const accent = SECTION_ACCENTS[label] || 'var(--ink-3)'
   return (
     <div
       onClick={onToggle}
       style={{
-        display:'flex', alignItems:'center', gap:8, marginBottom:8, marginTop:16,
+        display:'flex', alignItems:'center', gap:10,
+        marginBottom:10, marginTop:24,
+        paddingLeft: 10,
+        borderLeft: `3px solid ${accent}`,
         cursor: onToggle ? 'pointer' : 'default',
       }}
     >
-      <span style={{
-        fontSize:11, fontWeight:700, textTransform:'uppercase',
-        letterSpacing:'0.08em', color:'var(--ink-3)',
-      }}>
+      <span style={{ fontSize:13, fontWeight:500, color:'var(--ink-1)' }}>
         {label}
+        {dateRange && <span style={{ color: 'var(--ink-3)', fontWeight: 400 }}> — {dateRange}</span>}
       </span>
       {count != null && (
         <span style={{
-          background:'var(--accent)', color:'#fff', borderRadius:999,
-          fontSize:10, fontWeight:700, padding:'1px 7px',
+          background:'var(--bg-2)', color:'var(--ink-2)',
+          borderRadius:999, fontSize:11, fontWeight:600,
+          padding:'1px 8px',
         }}>
           {count}
         </span>
@@ -453,9 +475,10 @@ function AssignCrewExpansion({
   return (
     <div style={{
       borderTop:'1px solid var(--line)', background:'var(--bg)',
-      padding:'14px 16px', transition:'all 300ms ease-out',
+      maxHeight: 480, display:'flex', flexDirection:'column',
+      transition:'all 300ms ease-out',
     }}>
-      <div style={{marginBottom:10}}>
+      <div style={{padding:'14px 16px 8px', flexShrink: 0}}>
         <div style={{fontSize:14,fontWeight:700,color:'var(--ink-1)',marginBottom:2}}>
           Assign crew to {project.name}
         </div>
@@ -464,7 +487,11 @@ function AssignCrewExpansion({
         </div>
       </div>
 
-      <div style={{marginBottom:12}}>
+      {/* Scrollable employee list */}
+      <div style={{
+        flex: 1, minHeight: 0, overflowY: 'auto',
+        padding: '0 16px',
+      }}>
         {employees.map((emp, idx) => {
           const overlap = empOverlap[emp.id] || 0
           const isSelected = selected.has(emp.id)
@@ -514,64 +541,72 @@ function AssignCrewExpansion({
         })}
       </div>
 
-      {/* Hours calculator */}
+      {/* Sticky footer — hours calculator + buttons always visible */}
       <div style={{
-        background:'var(--panel)', borderRadius:9, padding:'10px 12px', marginBottom:12,
+        flexShrink: 0,
+        borderTop: '1px solid var(--line)',
+        background: 'var(--panel)',
+        padding: '12px 16px 14px',
       }}>
-        <div style={{fontSize:12,color:'var(--ink-2)',marginBottom:6}}>
-          Total project hours: <strong>{hrs}</strong> &nbsp;·&nbsp;
-          Selected: <strong>{selectedArr.length} crew</strong> &nbsp;·&nbsp;
-          Hours per person: <strong>~{autoHrsPerPerson} hrs</strong>
+        {/* Hours calculator */}
+        <div style={{
+          background:'var(--bg-2)', borderRadius:9, padding:'10px 12px', marginBottom:10,
+        }}>
+          <div style={{fontSize:12,color:'var(--ink-2)',marginBottom: selectedArr.length > 0 ? 6 : 0}}>
+            Total project hours: <strong>{hrs}</strong> &nbsp;·&nbsp;
+            Selected: <strong>{selectedArr.length} crew</strong> &nbsp;·&nbsp;
+            Hours per person: <strong>~{autoHrsPerPerson} hrs</strong>
+          </div>
+          {selectedArr.map(eid => {
+            const emp = employees.find(e=>e.id===eid)
+            if (!emp) return null
+            return (
+              <div key={eid} style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
+                <span style={{fontSize:12,color:'var(--ink-2)',minWidth:90,flex:1}}>{emp.name}:</span>
+                <input
+                  type="number"
+                  value={customHours[eid] != null ? customHours[eid] : autoHrsPerPerson}
+                  onClick={e => e.stopPropagation()}
+                  onChange={e => {
+                    e.stopPropagation()
+                    setCustomHours(prev => ({...prev, [eid]: parseInt(e.target.value)||0}))
+                  }}
+                  style={{
+                    width:64, padding:'3px 7px', borderRadius:6,
+                    border:'1px solid var(--line)', background:'var(--panel)',
+                    color:'var(--ink-1)', fontSize:12,
+                  }}
+                />
+                <span style={{fontSize:12,color:'var(--ink-3)'}}>hrs</span>
+              </div>
+            )
+          })}
         </div>
-        {selectedArr.map(eid => {
-          const emp = employees.find(e=>e.id===eid)
-          if (!emp) return null
-          return (
-            <div key={eid} style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
-              <span style={{fontSize:12,color:'var(--ink-2)',minWidth:90,flex:1}}>{emp.name}:</span>
-              <input
-                type="number"
-                value={customHours[eid] != null ? customHours[eid] : autoHrsPerPerson}
-                onClick={e => e.stopPropagation()}
-                onChange={e => {
-                  e.stopPropagation()
-                  setCustomHours(prev => ({...prev, [eid]: parseInt(e.target.value)||0}))
-                }}
-                style={{
-                  width:64, padding:'3px 7px', borderRadius:6,
-                  border:'1px solid var(--line)', background:'var(--bg)',
-                  color:'var(--ink-1)', fontSize:12,
-                }}
-              />
-              <span style={{fontSize:12,color:'var(--ink-3)'}}>hrs</span>
-            </div>
-          )
-        })}
-      </div>
 
-      <div style={{display:'flex',gap:8}}>
-        <button
-          onClick={e => { e.stopPropagation(); handleConfirm() }}
-          disabled={saving || selectedArr.length === 0}
-          style={{
-            flex:1, padding:'9px 0', borderRadius:8,
-            background:'var(--accent)', color:'#fff', border:'none',
-            fontWeight:600, fontSize:13, cursor:'pointer',
-            opacity: (saving || selectedArr.length === 0) ? 0.6 : 1,
-          }}
-        >
-          {saving ? 'Saving…' : `Assign ${selectedArr.length} crew member${selectedArr.length!==1?'s':''}`}
-        </button>
-        <button
-          onClick={e => { e.stopPropagation(); onCancel() }}
-          style={{
-            flex:1, padding:'9px 0', borderRadius:8,
-            background:'var(--line)', color:'var(--ink-1)', border:'none',
-            fontWeight:600, fontSize:13, cursor:'pointer',
-          }}
-        >
-          Cancel
-        </button>
+        <div style={{display:'flex',gap:8}}>
+          <button
+            onClick={e => { e.stopPropagation(); handleConfirm() }}
+            disabled={saving || selectedArr.length === 0}
+            style={{
+              flex:1, padding:'9px 0', borderRadius:8,
+              background:'var(--accent)', color:'#fff', border:'none',
+              fontWeight:600, fontSize:13, cursor:'pointer',
+              opacity: (saving || selectedArr.length === 0) ? 0.6 : 1,
+            }}
+          >
+            {saving ? 'Saving…' : `Assign ${selectedArr.length} crew member${selectedArr.length!==1?'s':''}`}
+          </button>
+          <button
+            onClick={e => { e.stopPropagation(); onCancel() }}
+            style={{
+              flex:1, padding:'9px 0', borderRadius:8,
+              background:'var(--line)', color:'var(--ink-1)', border:'none',
+              fontWeight:600, fontSize:13, cursor:'pointer',
+            }}
+          >
+            Cancel
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -590,8 +625,9 @@ function ProjectCard({
   const hrs = estimateLabourHours(project.square_footage||1200, project.density||'Medium')
   const neededCrew = estimateCrew(project.square_footage||1200, project.density||'Medium', project.job_type||'Clean Out')
   const assignedCount = empIds.length
-  const staffingColor = assignedCount === 0 ? '#EF4444' : assignedCount < neededCrew ? '#F59E0B' : '#22C55E'
-  const staffingLabel = assignedCount === 0 ? 'Needs crew' : assignedCount < neededCrew ? 'Partially staffed' : 'Fully staffed'
+  const staffingState = assignedCount === 0 ? STAFFING.none : assignedCount < neededCrew ? STAFFING.partial : STAFFING.full
+  const staffingColor = staffingState.dot
+  const staffingLabel = staffingState.label
 
   const hasNoDates = !project.project_start
 
@@ -614,7 +650,7 @@ function ProjectCard({
       background:'var(--panel)',
       border:'1px solid var(--line)',
       borderRadius:12,
-      borderLeft:`4px solid ${staffingColor}`,
+      borderLeft:`3px solid ${staffingState.border}`,
       marginBottom:10,
       overflow:'hidden',
     }}>
@@ -627,19 +663,22 @@ function ProjectCard({
           <span style={{fontWeight:700,fontSize:15,color:'var(--ink-1)',flex:1,minWidth:0}}>
             {project.name}
           </span>
-          {project.job_type && (
-            <span style={{
-              fontSize:10, fontWeight:700,
-              background: JOB_COLORS[project.job_type] || '#6B7280',
-              color:'#fff', borderRadius:999, padding:'2px 8px',
-              flexShrink:0,
-            }}>
-              {project.job_type}
-            </span>
-          )}
+          {project.job_type && (() => {
+            const c = jobChip(project.job_type)
+            return (
+              <span style={{
+                fontSize:10.5, fontWeight:700,
+                background: c.bg, color: c.text,
+                borderRadius:999, padding:'2px 9px',
+                flexShrink:0,
+              }}>
+                {project.job_type}
+              </span>
+            )
+          })()}
           <div style={{display:'flex',alignItems:'center',gap:4,flexShrink:0}}>
-            <StatusDot color={staffingColor} />
-            <span style={{fontSize:12,color:staffingColor,fontWeight:600}}>{staffingLabel}</span>
+            <StatusDot color={staffingState.dot} />
+            <span style={{fontSize:12,color:staffingState.text,fontWeight:600}}>{staffingLabel}</span>
           </div>
         </div>
 
@@ -822,23 +861,27 @@ function GridView({
                     verticalAlign:'top',
                     minHeight:40,
                   }}>
-                    {dayProjects.map(p => (
-                      <div
-                        key={p.id}
-                        onClick={() => onProjectClick(p.id)}
-                        style={{
-                          background: JOB_COLORS[p.job_type] || '#6B7280',
-                          color:'#fff', borderRadius:5,
-                          fontSize:10, fontWeight:600,
-                          padding:'3px 6px', marginBottom:2,
-                          cursor:'pointer', lineHeight:'1.3',
-                          overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
-                        }}
-                        title={p.name}
-                      >
-                        {p.name}
-                      </div>
-                    ))}
+                    {dayProjects.map(p => {
+                      const c = jobChip(p.job_type)
+                      return (
+                        <div
+                          key={p.id}
+                          onClick={() => onProjectClick(p.id)}
+                          style={{
+                            background: c.bg, color: c.text,
+                            borderLeft: `3px solid ${c.accent}`,
+                            borderRadius: 5,
+                            fontSize: 10.5, fontWeight: 600,
+                            padding: '3px 6px', marginBottom: 2,
+                            cursor: 'pointer', lineHeight: '1.3',
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          }}
+                          title={p.name}
+                        >
+                          {p.name}
+                        </div>
+                      )
+                    })}
                   </td>
                 )
               })}
@@ -974,7 +1017,7 @@ function AvailabilityPanel({
                     title={t.name}
                     style={{
                       display:'inline-block', width:8, height:8, borderRadius:'50%',
-                      background: JOB_COLORS[t.name] || '#6B7280',
+                      background: jobChip(t.name).accent,
                       cursor:'help',
                     }}
                   />
@@ -982,7 +1025,7 @@ function AvailabilityPanel({
               </div>
             </div>
 
-            {/* Hours bar */}
+            {/* Hours bar — bar at 60% opacity, label kept solid for readability */}
             <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:6}}>
               <div style={{
                 flex:1, height:6, borderRadius:999,
@@ -990,7 +1033,7 @@ function AvailabilityPanel({
               }}>
                 <div style={{
                   height:'100%', width:`${barPct}%`,
-                  background:barColor, borderRadius:999,
+                  background:barColor, opacity: 0.6, borderRadius:999,
                   transition:'width 300ms ease',
                 }} />
               </div>
@@ -1015,8 +1058,8 @@ function AvailabilityPanel({
                       key={d}
                       title={`${DAY_LABELS[di]}: ${tooltip} (${Math.round(dayHrs*10)/10} hrs)`}
                       style={{
-                        width:14, height:14, borderRadius:'50%',
-                        background:dotColor, cursor:'help',
+                        width:12, height:12, borderRadius:'50%',
+                        background:dotColor, opacity: isNonWorkDay ? 1 : 0.6, cursor:'help',
                       }}
                     />
                   )
@@ -1025,7 +1068,7 @@ function AvailabilityPanel({
               <div style={{display:'flex',gap:4,marginTop:2}}>
                 {DAY_LABELS.map((l,i)=>(
                   <span key={i} style={{
-                    width:14, textAlign:'center', fontSize:9,
+                    width:12, textAlign:'center', fontSize:9,
                     color:'var(--ink-4)', display:'block',
                   }}>{l}</span>
                 ))}
@@ -1214,8 +1257,12 @@ export default function CrewSchedule() {
   }, [projects, weekStart, weekEnd, nextWeekStart, nextWeekEnd])
 
   // ── Event handlers ──
+  // Track week-change for the fade transition.
+  const [weekFading, setWeekFading] = useState(false)
   function handleWeekNav(dir) {
+    setWeekFading(true)
     setWeekAnchor(prev => toDateStr(addDays(new Date(prev+'T00:00:00'), dir * 7)))
+    setTimeout(() => setWeekFading(false), 200)
   }
 
   function handleAssignClick(pid) {
@@ -1383,7 +1430,14 @@ export default function CrewSchedule() {
                 fontSize:14, fontWeight:600, color:'var(--ink-1)',
                 flex:1, textAlign:'center',
               }}>
-                {getWeekLabel(weekAnchor)}
+                {(() => {
+                  const offset = Math.round((new Date(weekAnchor+'T00:00:00') - new Date(getSundayOfWeek(today)+'T00:00:00')) / (7 * 86400000))
+                  const prefix = offset === 0 ? 'This Week: '
+                    : offset === 1 ? 'Next Week: '
+                    : offset === -1 ? 'Last Week: '
+                    : ''
+                  return `${prefix}${getWeekLabel(weekAnchor)}`
+                })()}
               </span>
               <button
                 onClick={() => handleWeekNav(1)}
@@ -1395,16 +1449,23 @@ export default function CrewSchedule() {
               >
                 <ChevronRight size={16} />
               </button>
-              <button
-                onClick={() => setWeekAnchor(getSundayOfWeek(today))}
-                style={{
-                  background:'var(--panel)', border:'1px solid var(--line)',
-                  borderRadius:7, padding:'5px 12px', fontSize:12,
-                  fontWeight:600, cursor:'pointer', color:'var(--ink-2)',
-                }}
-              >
-                Today
-              </button>
+              {(() => {
+                const isCurrent = weekAnchor === getSundayOfWeek(today)
+                return (
+                  <button
+                    onClick={() => { setWeekFading(true); setWeekAnchor(getSundayOfWeek(today)); setTimeout(() => setWeekFading(false), 200) }}
+                    style={{
+                      background: isCurrent ? 'var(--panel)' : 'var(--accent)',
+                      border:'1px solid ' + (isCurrent ? 'var(--line)' : 'var(--accent)'),
+                      borderRadius:7, padding:'5px 12px', fontSize:12,
+                      fontWeight:600, cursor:'pointer',
+                      color: isCurrent ? 'var(--ink-2)' : '#FFFFFF',
+                    }}
+                  >
+                    Today
+                  </button>
+                )
+              })()}
             </div>
 
             {/* View toggle */}
@@ -1439,6 +1500,10 @@ export default function CrewSchedule() {
             </div>
           </div>
 
+          <div style={{
+            opacity: weekFading ? 0.4 : 1,
+            transition: 'opacity 200ms ease',
+          }}>
           {viewMode === 'grid' ? (
             <GridView
               weekDates={weekDates}
@@ -1451,38 +1516,34 @@ export default function CrewSchedule() {
           ) : (
             <>
               {/* This Week */}
-              <SectionHeader label="This Week" count={thisWeek.length} />
+              <SectionHeader label="This Week" dateRange={getWeekLabel(weekAnchor)} count={thisWeek.length} />
               {thisWeek.length === 0 ? (
-                <p style={{fontSize:13,color:'var(--ink-4)',fontStyle:'italic',marginBottom:12}}>
+                <p style={{fontSize:12,color:'var(--ink-4)',fontStyle:'italic',marginBottom:12,paddingLeft:13}}>
                   No projects this week
                 </p>
               ) : thisWeek.map(renderProjectCard)}
 
               {/* Next Week */}
-              <SectionHeader label="Next Week" count={nextWeek.length} />
+              <SectionHeader label="Next Week" dateRange={getWeekLabel(nextWeekAnchor)} count={nextWeek.length} />
               {nextWeek.length === 0 ? (
-                <p style={{fontSize:13,color:'var(--ink-4)',fontStyle:'italic',marginBottom:12}}>
+                <p style={{fontSize:12,color:'var(--ink-4)',fontStyle:'italic',marginBottom:12,paddingLeft:13}}>
                   No projects next week
                 </p>
               ) : nextWeek.map(renderProjectCard)}
 
               {/* Upcoming */}
-              {(upcoming.length > 0 || true) && (
-                <>
-                  <SectionHeader
-                    label={`Upcoming (${upcoming.length})`}
-                    count={null}
-                    onToggle={upcoming.length > 0 ? () => setUpcomingExpanded(p=>!p) : undefined}
-                    expanded={upcomingExpanded}
-                  />
-                  {upcomingExpanded && (
-                    upcoming.length === 0 ? (
-                      <p style={{fontSize:13,color:'var(--ink-4)',fontStyle:'italic',marginBottom:12}}>
-                        No upcoming projects
-                      </p>
-                    ) : upcoming.map(renderProjectCard)
-                  )}
-                </>
+              <SectionHeader
+                label="Upcoming"
+                count={upcoming.length}
+                onToggle={upcoming.length > 0 ? () => setUpcomingExpanded(p=>!p) : undefined}
+                expanded={upcomingExpanded}
+              />
+              {upcomingExpanded && (
+                upcoming.length === 0 ? (
+                  <p style={{fontSize:12,color:'var(--ink-4)',fontStyle:'italic',marginBottom:12,paddingLeft:13}}>
+                    No upcoming projects
+                  </p>
+                ) : upcoming.map(renderProjectCard)
               )}
 
               {/* Needs Dates */}
@@ -1494,6 +1555,7 @@ export default function CrewSchedule() {
               )}
             </>
           )}
+          </div>
         </div>
 
         {/* RIGHT */}

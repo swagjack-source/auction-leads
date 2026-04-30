@@ -1,5 +1,5 @@
 import { useState, lazy, Suspense } from 'react'
-import { BrowserRouter, Routes, Route, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Outlet, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { Menu, Bell, Moon, Sun, HelpCircle } from 'lucide-react'
 import Tour from './components/Tour'
 import { useTheme } from './lib/ThemeContext'
@@ -225,7 +225,8 @@ export default function App() {
                   <Route element={<AppLayout />}>
                     <Route path="/"          element={<PrivateRoute><Home /></PrivateRoute>} />
                     <Route path="/pipeline"  element={<PrivateRoute><Pipeline /></PrivateRoute>} />
-                    <Route path="/scorer"    element={<PrivateRoute><DealScorer /></PrivateRoute>} />
+                    {/* Legacy /scorer route — Deal Scorer now opens from Projects */}
+                    <Route path="/scorer"    element={<Navigate to="/projects?openScorer=true" replace />} />
                     <Route path="/calendar"  element={<PrivateRoute><CalendarPage /></PrivateRoute>} />
                     <Route path="/bdr"       element={<PrivateRoute><BDR /></PrivateRoute>} />
                     <Route path="/contacts"  element={<PrivateRoute><Contacts /></PrivateRoute>} />
@@ -233,7 +234,8 @@ export default function App() {
                     <Route path="/training"  element={<PrivateRoute><Training /></PrivateRoute>} />
                     <Route path="/library"   element={<PrivateRoute><Library /></PrivateRoute>} />
                     <Route path="/activity"  element={<PrivateRoute><Activity /></PrivateRoute>} />
-                    <Route path="/templates" element={<PrivateRoute><Templates /></PrivateRoute>} />
+                    {/* /templates is now a tab inside /library */}
+                    <Route path="/templates" element={<Navigate to="/library?tab=templates" replace />} />
                     <Route path="/expenses"  element={<PrivateRoute><Expenses /></PrivateRoute>} />
                     <Route path="/inventory" element={<PrivateRoute><Inventory /></PrivateRoute>} />
                     <Route path="/ctbids"    element={<PrivateRoute><CTBids /></PrivateRoute>} />

@@ -1,8 +1,11 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect, lazy, Suspense } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Plus, Search, X, Upload, FileText, Star, BookOpen, ClipboardList, Megaphone, Scale, FolderOpen, Pin, MoreHorizontal, Download, ExternalLink } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import { useSupabaseQuery } from '../lib/useSupabaseQuery'
+
+const Templates = lazy(() => import('./Templates'))
 
 const DOC_TYPES = ['SOP', 'Contract', 'Checklist', 'Marketing', 'Legal', 'Other']
 
@@ -48,10 +51,24 @@ async function uploadToCloudinary(file) {
   const fd = new FormData()
   fd.append('file', file)
   fd.append('upload_preset', UPLOAD_PRESET)
-  const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/auto/upload`, {
-    method: 'POST', body: fd,
-  })
-  if (!res.ok) throw new Error('Upload failed')
+  let res
+  try {
+    res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/auto/upload`, {
+      method: 'POST', body: fd,
+    })
+  } catch (err) {
+    throw new Error(`Network error: could not reach Cloudinary (${err.message}). Check connection and that '${UPLOAD_PRESET}' exists as an Unsigned preset for cloud '${CLOUD_NAME}'.`)
+  }
+  if (!res.ok) {
+    let detail = ''
+    try {
+      const body = await res.json()
+      detail = body?.error?.message || JSON.stringify(body)
+    } catch {
+      detail = await res.text().catch(() => '')
+    }
+    throw new Error(`Upload failed (HTTP ${res.status}): ${detail || 'unknown error'}`)
+  }
   return res.json()
 }
 
@@ -273,6 +290,20 @@ export default function Library() {
   const [editDoc, setEditDoc] = useState(null)
   const [starred, setStarred] = useState(new Set())
   const [previewAsset, setPreviewAsset] = useState(null)
+  const [tab, setTab] = useState('assets') // 'assets' | 'templates'
+
+  // ?tab=templates opens the Templates view directly (e.g. from /templates redirect)
+  const [searchParams, setSearchParams] = useSearchParams()
+  useEffect(() => {
+    const t = searchParams.get('tab')
+    if (t === 'templates' || t === 'assets') {
+      setTab(t)
+      const next = new URLSearchParams(searchParams)
+      next.delete('tab')
+      setSearchParams(next, { replace: true })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const { data: assets = [], loading, error, refetch: refetchAssets } = useSupabaseQuery(async () => {
     const { data, error } = await supabase.from('library_assets').select('*').order('created_at', { ascending: false })
@@ -387,68 +418,106 @@ export default function Library() {
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14 }}>
             <div>
               <h1 style={{ fontSize: 17, fontWeight: 700, color: 'var(--ink-1)', margin: 0 }}>Library</h1>
-              <p style={{ fontSize: 12, color: 'var(--ink-3)', margin: '3px 0 0', fontWeight: 500 }}>{subtitle}</p>
+              <p style={{ fontSize: 12, color: 'var(--ink-3)', margin: '3px 0 0', fontWeight: 500 }}>
+                {tab === 'templates' ? 'Email & document templates' : subtitle}
+              </p>
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => setShowModal(true)} style={{
-                display: 'inline-flex', alignItems: 'center', gap: 6,
-                padding: '7px 13px', borderRadius: 9,
-                border: '1px solid var(--line)', background: 'var(--panel)',
-                color: 'var(--ink-2)', fontSize: 12.5, fontWeight: 500, cursor: 'pointer',
-                fontFamily: 'inherit',
-              }}>
-                <Upload size={13} strokeWidth={1.8} /> Upload
-              </button>
-              <button onClick={() => { setEditDoc(null); setShowModal(true) }} className="btn btn-primary" style={{ fontSize: 12.5, padding: '7px 13px 7px 10px', borderRadius: 10 }}>
-                <Plus size={13} strokeWidth={2.5} /> New Asset
-              </button>
-            </div>
+            {tab === 'assets' && (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => setShowModal(true)} style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  padding: '7px 13px', borderRadius: 9,
+                  border: '1px solid var(--line)', background: 'var(--panel)',
+                  color: 'var(--ink-2)', fontSize: 12.5, fontWeight: 500, cursor: 'pointer',
+                  fontFamily: 'inherit',
+                }}>
+                  <Upload size={13} strokeWidth={1.8} /> Upload
+                </button>
+                <button onClick={() => { setEditDoc(null); setShowModal(true) }} className="btn btn-primary" style={{ fontSize: 12.5, padding: '7px 13px 7px 10px', borderRadius: 10 }}>
+                  <Plus size={13} strokeWidth={2.5} /> New Asset
+                </button>
+              </div>
+            )}
           </div>
 
-          <div style={{ position: 'relative', maxWidth: 280 }}>
-            <Search size={13} color="var(--ink-3)" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
-            <input
-              placeholder="Search documents…"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              style={{ ...inputStyle, paddingLeft: 30 }}
-            />
+          {/* Tab strip */}
+          <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--line)', marginBottom: 14, marginTop: -4 }}>
+            {[
+              { key: 'assets',    label: 'Assets'    },
+              { key: 'templates', label: 'Templates' },
+            ].map(t => (
+              <button
+                key={t.key}
+                onClick={() => setTab(t.key)}
+                style={{
+                  padding: '8px 14px',
+                  border: 'none', background: 'transparent',
+                  cursor: 'pointer', fontFamily: 'inherit',
+                  fontSize: 13, fontWeight: 600,
+                  color: tab === t.key ? 'var(--ink-1)' : 'var(--ink-3)',
+                  borderBottom: tab === t.key ? '2px solid var(--accent)' : '2px solid transparent',
+                  marginBottom: -1,
+                }}
+              >
+                {t.label}
+              </button>
+            ))}
           </div>
-        </div>
 
-        {/* Document grid */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
-          {error ? (
-            <div style={{ textAlign: 'center', color: 'var(--lose)', fontSize: 13, marginTop: 60 }}>{error}</div>
-          ) : loading ? (
-            <div style={{ textAlign: 'center', color: 'var(--ink-3)', fontSize: 13, marginTop: 60 }}>Loading documents…</div>
-          ) : filtered.length === 0 ? (
-            <div style={{ textAlign: 'center', color: 'var(--ink-3)', fontSize: 13, marginTop: 60 }}>
-              {assets.length === 0
-                ? 'No documents yet — add your first one.'
-                : 'No documents match your search.'}
-            </div>
-          ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 12 }}>
-              {filtered.map(asset => (
-                <DocCard
-                  key={asset.id}
-                  asset={asset}
-                  starred={starred.has(asset.id)}
-                  onStar={() => setStarred(s => {
-                    const n = new Set(s)
-                    n.has(asset.id) ? n.delete(asset.id) : n.add(asset.id)
-                    return n
-                  })}
-                  onOpen={() => {
-                    if (asset.url) window.open(asset.url, '_blank')
-                    else { setEditDoc(asset); setShowModal(true) }
-                  }}
-                />
-              ))}
+          {tab === 'assets' && (
+            <div style={{ position: 'relative', maxWidth: 280 }}>
+              <Search size={13} color="var(--ink-3)" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
+              <input
+                placeholder="Search documents…"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                style={{ ...inputStyle, paddingLeft: 30 }}
+              />
             </div>
           )}
         </div>
+
+        {/* Body */}
+        {tab === 'templates' ? (
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            <Suspense fallback={<div style={{ textAlign: 'center', color: 'var(--ink-3)', fontSize: 13, marginTop: 60 }}>Loading templates…</div>}>
+              <Templates />
+            </Suspense>
+          </div>
+        ) : (
+          <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+            {error ? (
+              <div style={{ textAlign: 'center', color: 'var(--lose)', fontSize: 13, marginTop: 60 }}>{error}</div>
+            ) : loading ? (
+              <div style={{ textAlign: 'center', color: 'var(--ink-3)', fontSize: 13, marginTop: 60 }}>Loading documents…</div>
+            ) : filtered.length === 0 ? (
+              <div style={{ textAlign: 'center', color: 'var(--ink-3)', fontSize: 13, marginTop: 60 }}>
+                {assets.length === 0
+                  ? 'No documents yet — add your first one.'
+                  : 'No documents match your search.'}
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 12 }}>
+                {filtered.map(asset => (
+                  <DocCard
+                    key={asset.id}
+                    asset={asset}
+                    starred={starred.has(asset.id)}
+                    onStar={() => setStarred(s => {
+                      const n = new Set(s)
+                      n.has(asset.id) ? n.delete(asset.id) : n.add(asset.id)
+                      return n
+                    })}
+                    onOpen={() => {
+                      if (asset.url) window.open(asset.url, '_blank')
+                      else { setEditDoc(asset); setShowModal(true) }
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {showModal && (

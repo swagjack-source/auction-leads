@@ -47,19 +47,23 @@ describe('validatePhone', () => {
     expect(validatePhone('3035550100')).toBeNull()
   })
 
-  it('returns null for common US formats', () => {
+  it('returns null for common US formats with exactly 10 digits', () => {
     expect(validatePhone('(303) 555-0100')).toBeNull()
     expect(validatePhone('303-555-0100')).toBeNull()
-    expect(validatePhone('+1 303 555 0100')).toBeNull()
-    expect(validatePhone('+13035550100')).toBeNull()
+    expect(validatePhone('303 555 0100')).toBeNull()
   })
 
   it('returns an error for a too-short number', () => {
-    expect(validatePhone('123')).toMatch(/valid phone/)
+    expect(validatePhone('123')).toMatch(/10-digit/)
   })
 
   it('returns an error for letters in the number', () => {
-    expect(validatePhone('call-me-maybe')).toMatch(/valid phone/)
+    expect(validatePhone('call-me-maybe')).toMatch(/10-digit/)
+  })
+
+  it('returns an error for 11+ digits (e.g. with country code)', () => {
+    expect(validatePhone('+1 303 555 0100')).toMatch(/10-digit/)
+    expect(validatePhone('+13035550100')).toMatch(/10-digit/)
   })
 })
 
@@ -168,7 +172,7 @@ describe('Contact form validation (composite)', () => {
   })
 
   it('fails when phone is present but malformed', () => {
-    expect(validateContactForm({ name: 'Jane', email: '', phone: 'abc' })).toMatch(/valid phone/)
+    expect(validateContactForm({ name: 'Jane', email: '', phone: 'abc' })).toMatch(/10-digit/)
   })
 
   it('reports the first error only — name takes priority', () => {

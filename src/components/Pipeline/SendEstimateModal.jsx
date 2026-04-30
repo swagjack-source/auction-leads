@@ -4,6 +4,9 @@ import { X, Send, FileText } from 'lucide-react'
 // user actually sends an estimate rather than bundling it into Pipeline.
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../lib/AuthContext'
+import logger from '../../lib/logger'
+
+const SEND_TIMEOUT_MS = 10_000
 
 export default function SendEstimateModal({ lead, scoreDetails, onClose, onSent }) {
   const { organizationId } = useAuth()
@@ -22,6 +25,9 @@ export default function SendEstimateModal({ lead, scoreDetails, onClose, onSent 
     setSending(true)
     setError(null)
 
+    let emailSent = false
+    let emailError = null
+
     try {
       // 1. Generate PDF client-side (lazy-load the PDF renderer on first use)
       const [{ pdf }, { default: EstimateDoc }] = await Promise.all([
@@ -32,24 +38,40 @@ export default function SendEstimateModal({ lead, scoreDetails, onClose, onSent 
       const blob = await pdf(<EstimateDoc {...docData} />).toBlob()
       const base64 = await blobToBase64(blob)
 
-      // 2. Call Netlify function to email it
-      const res = await fetch('/.netlify/functions/send-estimate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          to: email.trim(),
-          clientName: lead.name,
-          pdfBase64: base64,
-          subject: 'Estimate from Caring Transitions Denver Southeast',
-        }),
-      })
-      if (!res.ok) {
-        const msg = await res.text()
-        throw new Error(msg || 'Email failed')
+      // 2. Call Netlify function to email it (with 10s timeout)
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), SEND_TIMEOUT_MS)
+      try {
+        const res = await fetch('/.netlify/functions/send-estimate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to: email.trim(),
+            clientName: lead.name,
+            pdfBase64: base64,
+            subject: 'Estimate from Caring Transitions Denver Southeast',
+          }),
+          signal: ctrl.signal,
+        })
+        if (!res.ok) {
+          const msg = await res.text().catch(() => '')
+          throw new Error(msg || `Email failed (HTTP ${res.status})`)
+        }
+        emailSent = true
+      } catch (err) {
+        if (err?.name === 'AbortError') {
+          emailError = 'Email send timed out after 10 seconds.'
+        } else {
+          emailError = err?.message || 'Email send failed.'
+        }
+        logger.error('send-estimate function failed', err)
+      } finally {
+        clearTimeout(timer)
       }
 
-      // 3. Save estimate record
-      await supabase.from('estimates').insert({
+      // 3. Always save the estimate record so the lead flow progresses,
+      //    even when email delivery fails. The user can resend later.
+      const { error: insErr } = await supabase.from('estimates').insert({
         lead_id:         lead.id,
         bid_amount:      bid,
         labour_hours:    labourHours,
@@ -58,8 +80,19 @@ export default function SendEstimateModal({ lead, scoreDetails, onClose, onSent 
         sent_at:         new Date().toISOString(),
         organization_id: organizationId,
       })
+      if (insErr) {
+        logger.error('Save estimate failed', insErr)
+        throw new Error(`Could not save estimate: ${insErr.message}`)
+      }
 
-      onSent('Estimate Sent')
+      if (emailSent) {
+        onSent('Estimate Sent')
+      } else {
+        // Estimate is saved & lead advances, but warn user email didn't deliver.
+        setError(`Estimate saved, but email delivery failed: ${emailError}. Send manually for now.`)
+        // Still advance the stage so the pipeline doesn't get stuck.
+        onSent('Estimate Sent')
+      }
     } catch (err) {
       setError(err.message)
     } finally {

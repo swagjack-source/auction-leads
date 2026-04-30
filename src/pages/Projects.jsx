@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   Download, Upload, Plus, Search, X,
   Calendar, Clock, AlertCircle, DollarSign,
-  CheckCircle, TrendingUp, BarChart2, Target,
+  CheckCircle, TrendingUp, BarChart2, Target, Star,
 } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import PortfolioBuilderModal from '../components/modals/PortfolioBuilderModal'
@@ -14,6 +15,15 @@ import DealScorerModal from '../components/Pipeline/DealScorerModal'
 import logger from '../lib/logger'
 import ErrorBoundary from '../components/ErrorBoundary'
 import InsightsTab from '../components/Projects/InsightsTab'
+import { checklistProgress } from '../lib/checklists'
+
+const AVATAR_COLORS = ['#ef4444','#f97316','#eab308','#22c55e','#3b82f6','#8b5cf6','#ec4899','#14b8a6']
+function avatarColor(name = '') {
+  return AVATAR_COLORS[(name.charCodeAt(0) || 0) % AVATAR_COLORS.length]
+}
+function avatarInitials(name = '') {
+  return name.split(' ').map(n => n[0]).filter(Boolean).join('').toUpperCase().slice(0, 2)
+}
 
 // ── Helpers ────────────────────────────────────────────────────
 function strToHue(str = '') {
@@ -209,13 +219,11 @@ function BidAccuracyStatCard({ dealScores }) {
 }
 
 // ── ProjectCard ────────────────────────────────────────────────
-function ProjectCard({ lead, onOpen }) {
+function ProjectCard({ lead, onOpen, assignedMembers = [] }) {
   const score  = lead.deal_score
   const bid    = lead._scoreDetails?.recommendedBid
   const sqft   = lead.square_footage
   const status = getProjectStatus(lead)
-  const owner  = (lead.assigned_to || 'MR').slice(0, 2).toUpperCase()
-  const hue    = strToHue(lead.assigned_to || 'mr')
   const source = lead.deal_score ? 'Scored' : 'Imported'
 
   const scoreColor = score >= 8 ? 'var(--win)' : score >= 6 ? 'var(--accent-ink)' : score >= 4 ? 'var(--warn)' : 'var(--lose)'
@@ -237,6 +245,11 @@ function ProjectCard({ lead, onOpen }) {
   const dateStr = lead.created_at
     ? new Date(lead.created_at).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
     : null
+
+  const checklist = Array.isArray(lead.checklist) ? lead.checklist : []
+  const cl = checklistProgress(checklist)
+  const visibleMembers = assignedMembers.slice(0, 3)
+  const overflow = Math.max(0, assignedMembers.length - visibleMembers.length)
 
   return (
     <div onClick={() => onOpen && onOpen(lead)} style={{
@@ -280,8 +293,53 @@ function ProjectCard({ lead, onOpen }) {
           <div className="tnum" style={{ fontSize: 12.5, fontWeight: 500, marginTop: 3 }}>{sqft ? `${Number(sqft).toLocaleString()} sqft` : '—'}</div>
         </div>
       </div>
+
+      {/* Team avatars (only real assignments) */}
+      {visibleMembers.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ display: 'flex' }}>
+            {visibleMembers.map((m, i) => (
+              <div
+                key={m.id}
+                title={m.name}
+                style={{
+                  width: 24, height: 24, borderRadius: '50%',
+                  background: avatarColor(m.name), color: '#fff',
+                  fontSize: 9, fontWeight: 700,
+                  display: 'grid', placeItems: 'center',
+                  border: '2px solid var(--panel)',
+                  marginLeft: i === 0 ? 0 : -6,
+                  zIndex: visibleMembers.length - i,
+                }}
+              >
+                {avatarInitials(m.name)}
+              </div>
+            ))}
+            {overflow > 0 && (
+              <div style={{
+                width: 24, height: 24, borderRadius: '50%',
+                background: 'var(--bg-2)', color: 'var(--ink-3)',
+                fontSize: 9, fontWeight: 700,
+                display: 'grid', placeItems: 'center',
+                border: '2px solid var(--panel)', marginLeft: -6,
+              }}>+{overflow}</div>
+            )}
+          </div>
+          <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>{visibleMembers[0].name}{assignedMembers.length > 1 ? ` +${assignedMembers.length - 1}` : ''}</span>
+        </div>
+      )}
+
+      {/* Checklist progress bar */}
+      {cl.total > 0 && (
+        <div>
+          <div style={{ position: 'relative', height: 4, borderRadius: 2, background: 'var(--line-2)', overflow: 'hidden' }}>
+            <div style={{ position: 'absolute', inset: '0 auto 0 0', width: `${cl.pct}%`, background: 'var(--win)' }} />
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 4 }}>{cl.done} of {cl.total} tasks</div>
+        </div>
+      )}
+
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: 'var(--ink-3)' }}>
-        <span style={{ width: 20, height: 20, borderRadius: '50%', background: `oklch(0.72 0.08 ${hue})`, color: 'white', fontSize: 9, fontWeight: 600, display: 'grid', placeItems: 'center', flexShrink: 0 }}>{owner}</span>
         {dateStr && <span>{dateStr}</span>}
         <span>·</span>
         <span style={{ color: source === 'Imported' ? 'var(--warn)' : 'var(--accent-ink)', fontWeight: 600 }}>{source}</span>
@@ -395,7 +453,7 @@ function PortfolioView({ rows, onOpen, onBuildDeck }) {
 }
 
 // ── CurrentProjectsTab ─────────────────────────────────────────
-function CurrentProjectsTab({ rows, allLeads, onOpen, onBuildDeck }) {
+function CurrentProjectsTab({ rows, allLeads, assignmentsMap = {}, onOpen, onBuildDeck }) {
   const [view,        setView]        = useState('grid')
   const [status,      setStatus]      = useState('all')
   const [sort,        setSort]        = useState('recent')
@@ -544,7 +602,14 @@ function CurrentProjectsTab({ rows, allLeads, onOpen, onBuildDeck }) {
         filtered.length === 0
           ? <div style={{ textAlign: 'center', color: 'var(--ink-4)', fontSize: 13, marginTop: 40 }}>No projects match your filters.</div>
           : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
-              {filtered.map(l => <ProjectCard key={l.id} lead={l} onOpen={onOpen} />)}
+              {filtered.map(l => (
+                <ProjectCard
+                  key={l.id}
+                  lead={l}
+                  onOpen={onOpen}
+                  assignedMembers={assignmentsMap[l.id] || []}
+                />
+              ))}
             </div>
       )}
       {view === 'table'     && <ProjectTable rows={filtered} onOpen={onOpen} />}
@@ -553,10 +618,136 @@ function CurrentProjectsTab({ rows, allLeads, onOpen, onBuildDeck }) {
   )
 }
 
+// ── EditableCell ───────────────────────────────────────────────
+//   Single-cell inline editor used in the Completed table.
+//   - kind: 'currency' | 'select' | 'rating'
+//   - onSave receives the new value (already coerced)
+//   - calls onSave on Enter / blur / Tab; reverts on Escape
+function EditableCell({ value, kind, options, onSave, fmt, color, fontWeight = 500 }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [saved, setSaved] = useState(false)
+  const inputRef = useRef(null)
+
+  useEffect(() => {
+    if (editing && inputRef.current) {
+      inputRef.current.focus()
+      if (inputRef.current.select) inputRef.current.select()
+    }
+  }, [editing])
+
+  function commit(raw) {
+    let next = raw
+    if (kind === 'currency') {
+      if (raw === '' || raw == null) next = null
+      else {
+        const num = Number(String(raw).replace(/[^0-9.\-]/g, ''))
+        if (Number.isNaN(num)) next = value
+        else next = num
+      }
+    }
+    if (next !== value) {
+      onSave(next)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 1200)
+    }
+    setEditing(false)
+  }
+
+  // RATING — 5-star click selector
+  if (kind === 'rating') {
+    return (
+      <div style={{ display: 'flex', gap: 1 }} onClick={e => e.stopPropagation()}>
+        {[1, 2, 3, 4, 5].map(n => (
+          <button
+            key={n}
+            onClick={() => onSave(n === value ? null : n)}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 1, color: (value || 0) >= n ? '#F59E0B' : 'var(--ink-4)' }}
+            aria-label={`${n} star${n > 1 ? 's' : ''}`}
+          >
+            <Star size={11} strokeWidth={1.6} fill={(value || 0) >= n ? '#F59E0B' : 'none'} />
+          </button>
+        ))}
+      </div>
+    )
+  }
+
+  // SELECT — dropdown for bid_accuracy
+  if (kind === 'select') {
+    return (
+      <select
+        value={value || ''}
+        onClick={e => e.stopPropagation()}
+        onChange={e => { onSave(e.target.value || null); setSaved(true); setTimeout(() => setSaved(false), 1200) }}
+        style={{
+          width: '100%', boxSizing: 'border-box',
+          padding: '4px 6px', fontSize: 11.5,
+          background: saved ? 'var(--win-soft)' : 'transparent',
+          border: '1px solid transparent',
+          borderRadius: 6, color: color || 'var(--ink-1)',
+          fontFamily: 'inherit', cursor: 'pointer',
+          fontWeight,
+        }}
+        onMouseEnter={e => { if (!saved) e.currentTarget.style.background = 'var(--bg-2)' }}
+        onMouseLeave={e => { if (!saved) e.currentTarget.style.background = 'transparent' }}
+      >
+        <option value="">—</option>
+        {options.map(o => <option key={o} value={o}>{o}</option>)}
+      </select>
+    )
+  }
+
+  // CURRENCY (default)
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        type="number"
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onClick={e => e.stopPropagation()}
+        onBlur={() => commit(draft)}
+        onKeyDown={e => {
+          if (e.key === 'Enter')   { e.preventDefault(); commit(draft) }
+          if (e.key === 'Escape')  { setEditing(false); setDraft('') }
+        }}
+        style={{
+          width: '100%', boxSizing: 'border-box',
+          padding: '4px 6px', fontSize: 12,
+          background: 'var(--panel)', border: '1px solid var(--accent)',
+          borderRadius: 6, color: 'var(--ink-1)', outline: 'none',
+          fontFamily: 'inherit',
+        }}
+      />
+    )
+  }
+  return (
+    <span
+      onClick={e => { e.stopPropagation(); setDraft(value == null ? '' : String(value)); setEditing(true) }}
+      style={{
+        display: 'inline-block', padding: '3px 6px',
+        cursor: 'pointer', borderRadius: 6,
+        background: saved ? 'var(--win-soft)' : 'transparent',
+        color: color || 'var(--ink-1)',
+        fontWeight,
+        transition: 'background 120ms',
+        minWidth: 30,
+      }}
+      onMouseEnter={e => { if (!saved) e.currentTarget.style.background = 'var(--bg-2)' }}
+      onMouseLeave={e => { if (!saved) e.currentTarget.style.background = 'transparent' }}
+    >
+      {fmt ? fmt(value) : (value ?? '—')}
+      {saved && <span style={{ marginLeft: 4, fontSize: 10, color: 'var(--win)' }}>✓</span>}
+    </span>
+  )
+}
+
 // ── CompletedProjectsTab ───────────────────────────────────────
-function CompletedProjectsTab({ rows, dealScores }) {
+function CompletedProjectsTab({ rows, dealScores, onUpdate }) {
   const [query, setQuery] = useState('')
   const [sort,  setSort]  = useState('recent')
+  const [bannerDismissed, setBannerDismissed] = useState(false)
+  const tableRef = useRef(null)
 
   const now     = new Date()
   const moStart = new Date(now.getFullYear(), now.getMonth(), 1)
@@ -574,18 +765,32 @@ function CompletedProjectsTab({ rows, dealScores }) {
       return d >= lmStart && d <= lmEnd
     })
 
-    const revThis = thisMonth.reduce((s, l) => s + (l._scoreDetails?.recommendedBid || 0), 0)
-    const revLast = lastMonth.reduce((s, l) => s + (l._scoreDetails?.recommendedBid || 0), 0)
+    const revFor = l => l.bid_amount ?? l._scoreDetails?.recommendedBid ?? 0
+    const revThis = thisMonth.reduce((s, l) => s + revFor(l), 0)
+    const revLast = lastMonth.reduce((s, l) => s + revFor(l), 0)
     const revDiff = revThis - revLast
 
-    // Avg profit margin
-    const withMargin = rows.filter(l => l._scoreDetails?.profitMarginPct != null)
-    const avgMargin  = withMargin.length
-      ? withMargin.reduce((s, l) => s + l._scoreDetails.profitMarginPct, 0) / withMargin.length
+    // Avg profit margin (prefer actuals when present)
+    const margins = rows.map(l => {
+      const rev = l.bid_amount ?? l._scoreDetails?.recommendedBid
+      if (!rev) return null
+      const lab = l.actual_labour_cost ?? l._scoreDetails?.labourCost ?? 0
+      const exp = l.actual_expenses ?? 0
+      const roy = l.actual_royalties ?? Math.round(rev * 0.08)
+      return Math.round(((rev - lab - exp - roy) / rev) * 100)
+    }).filter(m => m != null)
+    const avgMargin = margins.length
+      ? margins.reduce((s, m) => s + m, 0) / margins.length
       : null
 
-    return { thisMonth, revThis, revLast, revDiff, withMargin, avgMargin }
+    return { thisMonth, revThis, revLast, revDiff, withMargin: margins, avgMargin }
   }, [rows])
+
+  // Data quality: completed projects missing actuals
+  const missingDataCount = useMemo(() =>
+    rows.filter(l => l.bid_amount == null || l.actual_labour_cost == null).length,
+    [rows]
+  )
 
   const marginColor = stats.avgMargin == null ? 'var(--ink-1)'
     : stats.avgMargin >= 40 ? 'var(--win)'
@@ -595,12 +800,24 @@ function CompletedProjectsTab({ rows, dealScores }) {
     ? (stats.revDiff > 0 ? `+${fmtCurrency(stats.revDiff)}` : `-${fmtCurrency(Math.abs(stats.revDiff))}`) + ` vs ${lmName}`
     : moName
 
-  function getRevenue(l) { return l._scoreDetails?.recommendedBid || 0 }
-  function getProfit(l)  { return l._scoreDetails?.estimatedProfit || 0 }
+  function getRevenue(l) { return l.bid_amount ?? l._scoreDetails?.recommendedBid ?? 0 }
+  function getLabour(l)  { return l.actual_labour_cost ?? l._scoreDetails?.labourCost ?? 0 }
+  function getExpenses(l){ return l.actual_expenses ?? 0 }
+  function getRoyalties(l){
+    return l.actual_royalties ?? (getRevenue(l) ? Math.round(getRevenue(l) * 0.08) : 0)
+  }
+  function getProfit(l)  {
+    const rev = getRevenue(l)
+    if (l.actual_labour_cost != null || l.actual_expenses != null || l.actual_royalties != null) {
+      return rev - getLabour(l) - getExpenses(l) - getRoyalties(l)
+    }
+    return l._scoreDetails?.estimatedProfit ?? (rev ? rev - getLabour(l) - getRoyalties(l) : 0)
+  }
   function getMargin(l)  {
+    const rev = getRevenue(l)
+    if (rev > 0) return Math.round((getProfit(l) / rev) * 100)
     if (l._scoreDetails?.profitMarginPct != null) return l._scoreDetails.profitMarginPct
-    const rev = getRevenue(l); const profit = getProfit(l)
-    return rev > 0 ? Math.round((profit / rev) * 100) : null
+    return null
   }
 
   const filtered = useMemo(() => {
@@ -664,38 +881,121 @@ function CompletedProjectsTab({ rows, dealScores }) {
         </select>
       </div>
 
+      {/* Data quality banner */}
+      {missingDataCount > 0 && !bannerDismissed && (
+        <div style={{
+          background: '#FAEEDA',
+          border: '1px solid #ECD5A4',
+          borderRadius: 10,
+          padding: '10px 14px',
+          marginBottom: 12,
+          display: 'flex', alignItems: 'center', gap: 12,
+        }}>
+          <AlertCircle size={15} color="#92400E" strokeWidth={1.9} />
+          <span style={{ flex: 1, fontSize: 12.5, color: '#7C2D12', lineHeight: 1.45 }}>
+            <strong>{missingDataCount}</strong> project{missingDataCount === 1 ? ' is' : 's are'} missing financial data.
+            Fill in actual revenue and costs to improve deal scorer accuracy.
+          </span>
+          <button
+            onClick={() => tableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+            style={{ background: 'transparent', border: 'none', color: '#7C2D12', fontSize: 12, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline', fontFamily: 'inherit' }}
+          >
+            Edit in table →
+          </button>
+          <button
+            onClick={() => setBannerDismissed(true)}
+            style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#7C2D12', display: 'inline-flex', padding: 4 }}
+            aria-label="Dismiss"
+          >
+            <X size={13} />
+          </button>
+        </div>
+      )}
+
       {/* ── Table ── */}
-      <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 12, overflowX: 'auto' }}>
-        <div style={{ minWidth: 800 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 70px 110px 100px 90px 110px 70px 60px', gap: 8, padding: '10px 14px', fontSize: 10.5, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600, borderBottom: '1px solid var(--line)', background: 'var(--bg-2)' }}>
-            <span>Client</span><span>Type</span><span>Revenue (Est.)</span><span>Labor (Est.)</span><span>Royalties</span><span>Profit (Est.)</span><span>Margin</span><span>Owner</span>
+      <div ref={tableRef} style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 12, overflowX: 'auto' }}>
+        <div style={{ minWidth: 980 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 70px 110px 100px 90px 90px 110px 70px 110px 90px', gap: 8, padding: '10px 14px', fontSize: 10.5, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600, borderBottom: '1px solid var(--line)', background: 'var(--bg-2)' }}>
+            <span>Client</span>
+            <span>Type</span>
+            <span>Revenue</span>
+            <span>Labor</span>
+            <span>Expenses</span>
+            <span>Royalties</span>
+            <span>Profit</span>
+            <span>Margin</span>
+            <span>Bid Accuracy</span>
+            <span>Rating</span>
           </div>
           {filtered.map((lead, i) => {
-            const bid        = lead._scoreDetails?.recommendedBid || 0
-            const labor      = lead._scoreDetails?.labourCost || 0
-            const royalties  = Math.round(bid * 0.08)
-            const profit     = lead._scoreDetails?.estimatedProfit ?? null
-            const marginPct  = lead._scoreDetails?.profitMarginPct != null ? Math.round(lead._scoreDetails.profitMarginPct) : null
+            const rev = getRevenue(lead)
+            const profit = getProfit(lead)
+            const marginPct = getMargin(lead)
             const marginColor = marginPct == null ? 'var(--ink-4)' : marginPct >= 40 ? 'var(--win)' : marginPct >= 20 ? 'var(--accent-ink)' : marginPct >= 10 ? 'var(--warn)' : 'var(--lose)'
-            const owner      = (lead.assigned_to || 'MR').slice(0, 2).toUpperCase()
-            const hue        = strToHue(lead.assigned_to || 'mr')
+            const fmtMoney = v => v == null ? '—' : `$${Math.round(Number(v)).toLocaleString()}`
             return (
-              <div key={lead.id} style={{ display: 'grid', gridTemplateColumns: '1.3fr 70px 110px 100px 90px 110px 70px 60px', gap: 8, padding: '11px 14px', alignItems: 'center', fontSize: 12.5, borderBottom: i < filtered.length - 1 ? '1px solid var(--line-2)' : 'none' }}
-                onMouseOver={e => e.currentTarget.style.background = 'var(--bg-2)'}
-                onMouseOut={e  => e.currentTarget.style.background = 'transparent'}>
+              <div key={lead.id}
+                style={{ display: 'grid', gridTemplateColumns: '1.3fr 70px 110px 100px 90px 90px 110px 70px 110px 90px', gap: 8, padding: '8px 14px', alignItems: 'center', fontSize: 12.5, borderBottom: i < filtered.length - 1 ? '1px solid var(--line-2)' : 'none' }}>
                 <div>
                   <div style={{ fontWeight: 600, color: 'var(--ink-1)' }}>{lead.name}</div>
                   <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>{lead.address || '—'}</div>
                 </div>
                 <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>{lead.job_type}</span>
-                <span className="tnum" style={{ fontWeight: 600 }}>{bid ? `$${bid.toLocaleString()}` : '—'}</span>
-                <span className="tnum" style={{ color: 'var(--ink-3)' }}>{labor ? `$${labor.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '—'}</span>
-                <span className="tnum" style={{ color: 'var(--ink-3)' }}>{royalties ? `$${royalties.toLocaleString()}` : '—'}</span>
-                <span className="tnum" style={{ fontWeight: 600, color: profit != null ? 'var(--win)' : 'var(--ink-4)' }}>{profit != null ? `$${profit.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : 'Pending'}</span>
-                <span className="tnum" style={{ fontWeight: 600, color: marginColor }}>{marginPct != null ? `${marginPct}%` : '—'}</span>
-                <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-                  <span style={{ width: 20, height: 20, borderRadius: '50%', background: `oklch(0.72 0.08 ${hue})`, color: 'white', fontSize: 9, fontWeight: 600, display: 'grid', placeItems: 'center' }}>{owner}</span>
+                <span className="tnum">
+                  <EditableCell
+                    kind="currency"
+                    value={lead.bid_amount ?? null}
+                    fmt={v => v == null ? (rev ? `$${Math.round(rev).toLocaleString()}` : '—') : `$${Math.round(Number(v)).toLocaleString()}`}
+                    onSave={v => onUpdate(lead.id, { bid_amount: v })}
+                    fontWeight={600}
+                  />
                 </span>
+                <span className="tnum">
+                  <EditableCell
+                    kind="currency"
+                    value={lead.actual_labour_cost ?? null}
+                    fmt={fmtMoney}
+                    onSave={v => onUpdate(lead.id, { actual_labour_cost: v })}
+                    color="var(--ink-2)"
+                  />
+                </span>
+                <span className="tnum">
+                  <EditableCell
+                    kind="currency"
+                    value={lead.actual_expenses ?? null}
+                    fmt={fmtMoney}
+                    onSave={v => onUpdate(lead.id, { actual_expenses: v })}
+                    color="var(--ink-2)"
+                  />
+                </span>
+                <span className="tnum">
+                  <EditableCell
+                    kind="currency"
+                    value={lead.actual_royalties ?? null}
+                    fmt={fmtMoney}
+                    onSave={v => onUpdate(lead.id, { actual_royalties: v })}
+                    color="var(--ink-2)"
+                  />
+                </span>
+                <span className="tnum" style={{ fontWeight: 600, color: profit > 0 ? 'var(--win)' : profit < 0 ? 'var(--lose)' : 'var(--ink-4)' }}>
+                  {rev ? `$${Math.round(profit).toLocaleString()}` : '—'}
+                </span>
+                <span className="tnum" style={{ fontWeight: 600, color: marginColor }}>
+                  {marginPct != null ? `${marginPct}%` : '—'}
+                </span>
+                <EditableCell
+                  kind="select"
+                  value={lead.bid_accuracy ?? null}
+                  options={['Underbid', 'Good Bid', 'Overbid']}
+                  onSave={v => onUpdate(lead.id, { bid_accuracy: v })}
+                  color={lead.bid_accuracy === 'Good Bid' ? 'var(--win)' : lead.bid_accuracy === 'Underbid' ? 'var(--lose)' : lead.bid_accuracy === 'Overbid' ? 'var(--warn)' : 'var(--ink-3)'}
+                  fontWeight={600}
+                />
+                <EditableCell
+                  kind="rating"
+                  value={lead.retro_rating ?? null}
+                  onSave={v => onUpdate(lead.id, { retro_rating: v })}
+                />
               </div>
             )
           })}
@@ -713,6 +1013,7 @@ export default function Projects() {
   const { organizationId } = useAuth()
   const [leads,      setLeads]      = useState([])
   const [dealScores, setDealScores] = useState([])
+  const [assignmentsMap, setAssignmentsMap] = useState({}) // lead_id → [{id,name,role}]
   const [loading,    setLoading]    = useState(true)
   const [error,      setError]      = useState(null)
   const [tab,        setTab]        = useState('current')
@@ -721,6 +1022,7 @@ export default function Projects() {
   const [selectedProject, setSelectedProject] = useState(null)
   const [scorerProject,   setScorerProject]   = useState(null)
   const fileRef = useRef()
+  const [searchParams, setSearchParams] = useSearchParams()
 
   useEffect(() => {
     const btn = document.getElementById('projects-new-btn')
@@ -729,12 +1031,54 @@ export default function Projects() {
 
   useEffect(() => { fetchLeads() }, [])
 
+  // URL params: ?openScorer=true opens the scorer; ?leadId=<uuid> pre-fills it;
+  // ?tab=current|completed|insights switches tab.
+  // We re-run this effect whenever `leads` changes so the leadId lookup waits
+  // for the data fetch to land.
+  useEffect(() => {
+    const openScorer = searchParams.get('openScorer')
+    const tabParam = searchParams.get('tab')
+    const leadIdParam = searchParams.get('leadId')
+    let consumed = false
+
+    if (openScorer === 'true') {
+      if (leadIdParam) {
+        // Need leads loaded to look up the row; bail out and retry on next render
+        const lead = leads.find(l => String(l.id) === String(leadIdParam))
+        if (lead) {
+          setScorerProject(lead)
+          consumed = true
+        } else if (leads.length > 0) {
+          // leads loaded but no match — open empty scorer anyway
+          setShowScorer(true)
+          consumed = true
+        }
+      } else {
+        setShowScorer(true)
+        consumed = true
+      }
+    }
+    if (tabParam === 'current' || tabParam === 'completed' || tabParam === 'insights') {
+      setTab(tabParam)
+      consumed = true
+    }
+    if (consumed) {
+      const next = new URLSearchParams(searchParams)
+      next.delete('openScorer')
+      next.delete('tab')
+      next.delete('leadId')
+      setSearchParams(next, { replace: true })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leads.length])
+
   async function fetchLeads() {
     setLoading(true); setError(null)
     try {
-      const [leadsRes, scoresRes] = await Promise.all([
+      const [leadsRes, scoresRes, assignmentsRes] = await Promise.all([
         supabase.from('leads').select('*').order('created_at', { ascending: false }),
         supabase.from('deal_scores').select('id, lead_id, bid_tag, created_at'),
+        supabase.from('project_assignments').select('lead_id, employees(id, name, role, active)'),
       ])
       if (leadsRes.error) {
         logger.error('Projects fetchLeads error', leadsRes.error)
@@ -743,11 +1087,34 @@ export default function Projects() {
         setLeads((leadsRes.data || []).map(enrichLead))
       }
       setDealScores(scoresRes.data || [])
+      // Build map: lead_id → [employee, ...]
+      const map = {}
+      for (const row of (assignmentsRes.data || [])) {
+        if (!row.employees) continue
+        if (!map[row.lead_id]) map[row.lead_id] = []
+        map[row.lead_id].push(row.employees)
+      }
+      setAssignmentsMap(map)
     } catch (e) {
       logger.error('Projects fetchLeads threw', e)
       setError('Failed to load projects. Please try again.')
     }
     setLoading(false)
+  }
+
+  // Inline-edit save for the Completed table cells.
+  // Optimistic update + DB write + revert-on-failure.
+  async function updateLead(id, fields) {
+    let prev = null
+    setLeads(ls => {
+      prev = ls.find(l => l.id === id)
+      return ls.map(l => l.id === id ? enrichLead({ ...l, ...fields }) : l)
+    })
+    const { error } = await supabase.from('leads').update(fields).eq('id', id)
+    if (error) {
+      logger.error('updateLead failed', error)
+      if (prev) setLeads(ls => ls.map(l => l.id === id ? prev : l))
+    }
   }
 
   async function handleImport(e) {
@@ -859,9 +1226,9 @@ export default function Projects() {
       {loading ? (
         <div style={{ textAlign: 'center', color: 'var(--ink-4)', fontSize: 13, marginTop: 60 }}>Loading…</div>
       ) : tab === 'current' ? (
-        <CurrentProjectsTab rows={currentLeads} allLeads={leads} onOpen={setSelectedProject} onBuildDeck={() => setShowPortfolio(true)} />
+        <CurrentProjectsTab rows={currentLeads} allLeads={leads} assignmentsMap={assignmentsMap} onOpen={setSelectedProject} onBuildDeck={() => setShowPortfolio(true)} />
       ) : tab === 'completed' ? (
-        <CompletedProjectsTab rows={completedLeads} dealScores={dealScores} />
+        <CompletedProjectsTab rows={completedLeads} dealScores={dealScores} onUpdate={updateLead} />
       ) : (
         <InsightsTab leads={leads} />
       )}

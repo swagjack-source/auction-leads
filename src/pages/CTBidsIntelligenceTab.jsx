@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react'
 import { TrendingUp, TrendingDown } from 'lucide-react'
 import {
-  LineChart, Line, BarChart, Bar, ScatterChart, Scatter,
+  LineChart, Line, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  ResponsiveContainer, Cell, ReferenceLine,
-  PieChart, Pie, ZAxis,
+  ResponsiveContainer, Cell,
+  PieChart, Pie,
 } from 'recharts'
 import { PROFIT_THRESHOLD } from './CTBids'
 
@@ -21,20 +21,6 @@ function SectionHeader({ title, subtitle }) {
     <div style={{ marginBottom: 12 }}>
       <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.01em' }}>{title}</div>
       {subtitle && <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>{subtitle}</div>}
-    </div>
-  )
-}
-
-function CustomScatterTooltip({ active, payload }) {
-  if (!active || !payload?.length) return null
-  const d = payload[0]?.payload
-  if (!d) return null
-  return (
-    <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, padding: '10px 14px', fontSize: 12, boxShadow: 'var(--shadow-1)' }}>
-      <div style={{ fontWeight: 600, marginBottom: 4 }}>{d.name}</div>
-      <div>Avg Price: <b>${d.y}</b></div>
-      <div>Avg Bids: <b>{d.x}</b></div>
-      <div>Items Sold: <b>{d.z}</b></div>
     </div>
   )
 }
@@ -68,17 +54,6 @@ export default function CTBidsIntelligenceTab({ D }) {
     shortName: s.title.split(':')[0].slice(0, 20),
     avgPrice: Math.round(s.avgPrice || 0),
   })), [D.sales])
-
-  // 7D: Scatter
-  const scatterData = useMemo(() => D.categories
-    .filter(c => c.sold >= 5)
-    .map(c => ({
-      x: Math.round(c.bids || 0),
-      y: Math.round(c.avg || 0),
-      z: c.sold,
-      name: c.cat,
-      profitable: (c.avg || 0) >= PROFIT_THRESHOLD,
-    })), [D.categories])
 
   // 7E: Donuts
   const sellThrough = parseFloat(D.summary['Sell-Through Rate']) || 97
@@ -236,39 +211,6 @@ export default function CTBidsIntelligenceTab({ D }) {
                   activeDot={{ r: 6 }}
                 />
               </LineChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-      </div>
-
-      {/* 7D: Category Performance Scatter */}
-      <div>
-        <SectionHeader title="Category Performance Map" subtitle="Bubble size = items sold. Top-right quadrant = high demand + high value" />
-        {scatterData.length < 5 ? (
-          <EmptyState message="Need at least 5 categories with 5+ items sold" />
-        ) : (
-          <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 14, padding: '16px', boxShadow: 'var(--shadow-1)' }}>
-            <ResponsiveContainer width="100%" height={350}>
-              <ScatterChart margin={{ left: 10, right: 20, top: 10, bottom: 20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--line-2)" />
-                <XAxis type="number" dataKey="x" name="Avg Bids" label={{ value: 'Avg Bids', position: 'insideBottom', offset: -10, fontSize: 11 }} tick={{ fontSize: 11 }} />
-                <YAxis type="number" dataKey="y" name="Avg Price" tickFormatter={v => `$${v}`} label={{ value: 'Avg Price $', angle: -90, position: 'insideLeft', fontSize: 11 }} tick={{ fontSize: 11 }} />
-                <ZAxis type="number" dataKey="z" range={[40, 400]} />
-                <Tooltip content={<CustomScatterTooltip />} />
-                <ReferenceLine
-                  y={PROFIT_THRESHOLD}
-                  stroke="#DC2626"
-                  strokeDasharray="4 2"
-                />
-                <Scatter
-                  data={scatterData}
-                  opacity={0.8}
-                >
-                  {scatterData.map((entry, index) => (
-                    <Cell key={index} fill={entry.profitable ? '#2F7A55' : '#DC2626'} />
-                  ))}
-                </Scatter>
-              </ScatterChart>
             </ResponsiveContainer>
           </div>
         )}

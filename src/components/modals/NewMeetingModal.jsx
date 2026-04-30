@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import { X, CalendarDays } from 'lucide-react'
+import { supabase } from '../../lib/supabase'
+import logger from '../../lib/logger'
 
 const fieldBase = {
   width: '100%', boxSizing: 'border-box',
@@ -68,20 +70,17 @@ function SelField({ options, value, onChange }) {
   )
 }
 
-const OWNERS = [
-  { id: 'dk', name: 'Donna K.' },
-  { id: 'ml', name: 'Mike L.' },
-  { id: 'rp', name: 'Rachel P.' },
-]
-
 export default function NewMeetingModal({ onClose, onSave }) {
+  const [employees, setEmployees] = useState([])
   const [form, setForm] = useState({
     type: 'consult', title: '', contact: '', date: '', time: '10:00',
-    duration: '60', location: 'onsite', address: '', owner: 'dk', notes: '',
+    duration: '60', location: 'onsite', address: '', owner: '', notes: '',
     sendInvite: true,
   })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
-  const valid = form.title && form.date && form.time
+  const valid = form.title && form.date && form.time && !saving
 
   useEffect(() => {
     const handler = e => { if (e.key === 'Escape') onClose() }
@@ -89,10 +88,54 @@ export default function NewMeetingModal({ onClose, onSave }) {
     return () => window.removeEventListener('keydown', handler)
   }, [onClose])
 
-  const handleSave = () => {
+  // Load real active employees for the assignee dropdown.
+  useEffect(() => {
+    let cancelled = false
+    supabase.from('employees').select('id, name').eq('active', true).order('name')
+      .then(({ data, error: empErr }) => {
+        if (cancelled) return
+        if (empErr) {
+          logger.error('NewMeetingModal load employees failed', empErr)
+          return
+        }
+        const list = data || []
+        setEmployees(list)
+        if (list.length > 0 && !form.owner) {
+          setForm(f => ({ ...f, owner: list[0].id }))
+        }
+      })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const handleSave = async () => {
     if (!valid) return
-    onSave && onSave(form)
-    onClose()
+    setSaving(true)
+    setError(null)
+    try {
+      const eventType = form.type === 'consult' ? 'consult' : 'meeting'
+      const { error: insErr } = await supabase.from('calendar_events').insert({
+        title:       form.title.trim(),
+        event_type:  eventType,
+        event_date:  form.date,
+        event_time:  form.time || null,
+        address:     form.location === 'onsite' ? (form.address || null) : null,
+        notes:       form.notes || null,
+        assigned_to: form.owner || null,
+      })
+      if (insErr) {
+        logger.error('NewMeetingModal insert failed', insErr)
+        setError(insErr.message)
+        setSaving(false)
+        return
+      }
+      onSave && onSave(form)
+      onClose()
+    } catch (e) {
+      logger.error('NewMeetingModal threw', e)
+      setError(e?.message || 'Failed to save meeting.')
+      setSaving(false)
+    }
   }
 
   const btnPrimary = {
@@ -147,7 +190,15 @@ export default function NewMeetingModal({ onClose, onSave }) {
               <TextInput placeholder="e.g. Meeting with Patsy at MorningStar" value={form.title} onChange={e => set('title', e.target.value)} />
             </Field>
             <Field label="Assigned to" required>
-              <SelField value={form.owner} onChange={e => set('owner', e.target.value)} options={OWNERS.map(o => ({ value: o.id, label: o.name }))} />
+              <SelField
+                value={form.owner}
+                onChange={e => set('owner', e.target.value)}
+                options={
+                  employees.length > 0
+                    ? employees.map(e => ({ value: e.id, label: e.name }))
+                    : [{ value: '', label: 'No employees yet' }]
+                }
+              />
             </Field>
           </div>
 
@@ -203,14 +254,19 @@ export default function NewMeetingModal({ onClose, onSave }) {
         </div>
 
         {/* Footer */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 20px', borderTop: '1px solid var(--line)', background: 'var(--bg-2)' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ink-3)', cursor: 'pointer' }}>
-            <input type="checkbox" checked={form.sendInvite} onChange={e => set('sendInvite', e.target.checked)} />
-            Send calendar invite
-          </label>
-          <div style={{ flex: 1 }} />
-          <button style={btnGhost} onClick={onClose}>Cancel</button>
-          <button style={btnPrimary} onClick={handleSave}>Schedule Meeting</button>
+        <div style={{ borderTop: '1px solid var(--line)', background: 'var(--bg-2)' }}>
+          {error && (
+            <div style={{ padding: '8px 20px 0', fontSize: 12, color: 'var(--lose)' }}>{error}</div>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 20px' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ink-3)', cursor: 'pointer' }}>
+              <input type="checkbox" checked={form.sendInvite} onChange={e => set('sendInvite', e.target.checked)} />
+              Send calendar invite
+            </label>
+            <div style={{ flex: 1 }} />
+            <button style={btnGhost} onClick={onClose} disabled={saving}>Cancel</button>
+            <button style={btnPrimary} onClick={handleSave}>{saving ? 'Saving…' : 'Schedule Meeting'}</button>
+          </div>
         </div>
       </div>
     </>

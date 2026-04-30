@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { ChevronLeft, ChevronRight, Download, AlertCircle, X, Rss, Check, Copy, Plus, MapPin, ExternalLink } from 'lucide-react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { ChevronLeft, ChevronRight, Download, X, Rss, Check, Copy, Plus, MapPin, ExternalLink } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { estimateCrew, estimateProjectDays } from '../lib/scoring'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { useTeam } from '../lib/TeamContext'
 import { useAuth } from '../lib/AuthContext'
-import NewMeetingModal from '../components/modals/NewMeetingModal'
+import logger from '../lib/logger'
 
 // ── Date helpers ──────────────────────────────────────────────
 
@@ -218,8 +219,16 @@ function assignLanes(rowProjects) {
 
 // ── Event Popover ─────────────────────────────────────────────
 
-function EventPopover({ event, anchorRect, memberMap, onClose }) {
+function EventPopover({ event, anchorRect, memberMap, onClose, onChanged, onOpenLead, onOpenProject }) {
   const ref = useRef(null)
+  const [mode, setMode] = useState('view') // 'view' | 'reschedule' | 'edit' | 'confirm-cancel' | 'confirm-delete'
+  const [draftDate, setDraftDate] = useState(event.date || '')
+  const [draftTime, setDraftTime] = useState(event.time || '')
+  const [draftTitle, setDraftTitle] = useState(event.title || '')
+  const [draftAddr, setDraftAddr] = useState(event.address || '')
+  const [draftNotes, setDraftNotes] = useState(event.notes || '')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
 
   useEffect(() => {
     function onKey(e) { if (e.key === 'Escape') onClose() }
@@ -235,6 +244,84 @@ function EventPopover({ event, anchorRect, memberMap, onClose }) {
   }, [onClose])
 
   if (!anchorRect) return null
+
+  // ── Actions ──────────────────────────────────────────────
+  async function rescheduleConsult() {
+    if (!draftDate) return
+    setBusy(true)
+    setErr(null)
+    try {
+      const isoDateTime = draftTime ? `${draftDate}T${draftTime}:00` : `${draftDate}T09:00:00`
+      // Update calendar_events row
+      const { error: e1 } = await supabase.from('calendar_events').update({
+        event_date: draftDate, event_time: draftTime || null,
+      }).eq('id', event.id)
+      if (e1) throw e1
+      // Mirror to lead.consult_at when there's a linked lead
+      if (event.lead_id) {
+        await supabase.from('leads').update({ consult_at: isoDateTime }).eq('id', event.lead_id)
+      }
+      onChanged?.()
+      onClose()
+    } catch (e) {
+      logger.error('Reschedule consult failed', e)
+      setErr(e?.message || 'Failed to reschedule.')
+      setBusy(false)
+    }
+  }
+
+  async function cancelConsult() {
+    setBusy(true)
+    setErr(null)
+    try {
+      const { error: e1 } = await supabase.from('calendar_events').delete().eq('id', event.id)
+      if (e1) throw e1
+      if (event.lead_id) {
+        await supabase.from('leads').update({ status: 'Contacted', consult_at: null }).eq('id', event.lead_id)
+      }
+      onChanged?.()
+      onClose()
+    } catch (e) {
+      logger.error('Cancel consult failed', e)
+      setErr(e?.message || 'Failed to cancel consult.')
+      setBusy(false)
+    }
+  }
+
+  async function saveMeetingEdit() {
+    setBusy(true)
+    setErr(null)
+    try {
+      const { error: e1 } = await supabase.from('calendar_events').update({
+        title: draftTitle.trim(),
+        event_date: draftDate, event_time: draftTime || null,
+        address: draftAddr || null,
+        notes: draftNotes || null,
+      }).eq('id', event.id)
+      if (e1) throw e1
+      onChanged?.()
+      onClose()
+    } catch (e) {
+      logger.error('Meeting edit failed', e)
+      setErr(e?.message || 'Failed to save.')
+      setBusy(false)
+    }
+  }
+
+  async function deleteMeeting() {
+    setBusy(true)
+    setErr(null)
+    try {
+      const { error: e1 } = await supabase.from('calendar_events').delete().eq('id', event.id)
+      if (e1) throw e1
+      onChanged?.()
+      onClose()
+    } catch (e) {
+      logger.error('Delete meeting failed', e)
+      setErr(e?.message || 'Failed to delete meeting.')
+      setBusy(false)
+    }
+  }
 
   // Position: try to appear below-right, but avoid going off screen
   const W = 280
@@ -281,7 +368,10 @@ function EventPopover({ event, anchorRect, memberMap, onClose }) {
 
       {event.type === 'project' && (
         <>
-          <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--ink-1)', marginBottom: 6, paddingRight: 20 }}>{event.name}</div>
+          <div
+            onClick={() => onOpenProject?.(event)}
+            style={{ fontWeight: 700, fontSize: 15, color: 'var(--ink-1)', marginBottom: 6, paddingRight: 20, cursor: 'pointer' }}
+          >{event.name}</div>
           {event.job_type && (
             <span style={{ background: (JOB_CHIP[event.job_type] || JOB_CHIP['Both']).bg, color: (JOB_CHIP[event.job_type] || JOB_CHIP['Both']).accent, borderRadius: 5, padding: '2px 8px', fontSize: 11, fontWeight: 700, marginBottom: 10, display: 'inline-block' }}>
               {event.job_type}
@@ -311,16 +401,22 @@ function EventPopover({ event, anchorRect, memberMap, onClose }) {
                 <MapPin size={12} /> Directions
               </a>
             )}
-            <a href="/projects" style={{ marginLeft: 'auto', background: 'linear-gradient(135deg,#A50050,#CD545B)', borderRadius: 7, padding: '5px 12px', color: '#fff', fontSize: 12, fontWeight: 600, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <button
+              onClick={() => onOpenProject?.(event)}
+              style={{ marginLeft: 'auto', background: 'var(--accent)', borderRadius: 7, padding: '5px 12px', color: '#fff', fontSize: 12, fontWeight: 600, border: 'none', display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontFamily: 'inherit' }}
+            >
               <ExternalLink size={12} /> Open Project
-            </a>
+            </button>
           </div>
         </>
       )}
 
       {event.type === 'consult' && (
         <>
-          <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--ink-1)', marginBottom: 4, paddingRight: 20 }}>{event.name}</div>
+          <div
+            onClick={() => event.lead_id && onOpenLead?.(event.lead_id)}
+            style={{ fontWeight: 700, fontSize: 15, color: 'var(--ink-1)', marginBottom: 4, paddingRight: 20, cursor: event.lead_id ? 'pointer' : 'default' }}
+          >{event.name}</div>
           {event.time && <div style={{ fontSize: 12, color: '#7F77DD', fontWeight: 600, marginBottom: 8 }}>{fmtTime(event.time)}</div>}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {member && (
@@ -336,51 +432,114 @@ function EventPopover({ event, anchorRect, memberMap, onClose }) {
               </div>
             )}
           </div>
-          {mapsUrl && (
-            <div style={{ marginTop: 10 }}>
-              <a href={mapsUrl} target="_blank" rel="noreferrer" style={{ background: 'rgba(127,119,221,0.12)', border: '1px solid rgba(127,119,221,0.3)', borderRadius: 7, padding: '5px 12px', color: '#7F77DD', fontSize: 12, fontWeight: 600, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                <MapPin size={12} /> Get Directions
-              </a>
+
+          {mode === 'reschedule' && (
+            <div style={{ marginTop: 10, padding: 8, background: 'var(--bg-2)', borderRadius: 8, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+              <input type="date" value={draftDate} onChange={e => setDraftDate(e.target.value)} style={{ width: '100%', boxSizing: 'border-box', padding: '6px 8px', fontSize: 12, border: '1px solid var(--line)', borderRadius: 6, background: 'var(--panel)', color: 'var(--ink-1)' }} />
+              <input type="time" value={draftTime || ''} onChange={e => setDraftTime(e.target.value)} style={{ width: '100%', boxSizing: 'border-box', padding: '6px 8px', fontSize: 12, border: '1px solid var(--line)', borderRadius: 6, background: 'var(--panel)', color: 'var(--ink-1)' }} />
+              <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+                <button onClick={() => setMode('view')} disabled={busy} style={popBtn('var(--bg)','var(--ink-2)','var(--line)')}>Cancel</button>
+                <button onClick={rescheduleConsult} disabled={busy || !draftDate} style={popBtn('var(--accent)','#fff','transparent')}>{busy ? 'Saving…' : 'Save'}</button>
+              </div>
             </div>
           )}
+
+          {mode === 'confirm-cancel' && (
+            <div style={{ marginTop: 10, padding: 8, background: 'rgba(239,68,68,0.08)', borderRadius: 8, fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.4 }}>
+              Cancel this consult? The lead will move back to Contacted.
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 8 }}>
+                <button onClick={() => setMode('view')} disabled={busy} style={popBtn('var(--bg)','var(--ink-2)','var(--line)')}>Keep</button>
+                <button onClick={cancelConsult} disabled={busy} style={popBtn('#ef4444','#fff','transparent')}>{busy ? 'Cancelling…' : 'Yes, cancel'}</button>
+              </div>
+            </div>
+          )}
+
+          {mode === 'view' && (
+            <div style={{ marginTop: 10, display: 'flex', gap: 6 }}>
+              {mapsUrl && (
+                <a href={mapsUrl} target="_blank" rel="noreferrer" style={{ background: 'rgba(127,119,221,0.12)', border: '1px solid rgba(127,119,221,0.3)', borderRadius: 7, padding: '5px 12px', color: '#7F77DD', fontSize: 12, fontWeight: 600, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <MapPin size={12} /> Get Directions
+                </a>
+              )}
+              <button onClick={() => setMode('reschedule')} style={popBtn('var(--bg)','var(--ink-2)','var(--line)')}>Reschedule</button>
+              <button onClick={() => setMode('confirm-cancel')} style={popBtn('transparent','#ef4444','transparent')}>Cancel</button>
+            </div>
+          )}
+
+          {err && <div style={{ marginTop: 8, fontSize: 11, color: 'var(--lose)' }}>{err}</div>}
         </>
       )}
 
       {event.type === 'meeting' && (
         <>
-          <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--ink-1)', marginBottom: 4, paddingRight: 20 }}>{event.title}</div>
-          {event.time && <div style={{ fontSize: 12, color: '#1D9E75', fontWeight: 600, marginBottom: 8 }}>{fmtTime(event.time)}</div>}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {member && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ink-2)' }}>
-                <MemberAvatar member={member} size={18} />
-                {member.name}
+          {mode === 'edit' ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <input value={draftTitle} onChange={e => setDraftTitle(e.target.value)} placeholder="Title" style={{ width: '100%', boxSizing: 'border-box', padding: '6px 8px', fontSize: 13, border: '1px solid var(--line)', borderRadius: 6, background: 'var(--panel)', color: 'var(--ink-1)', fontWeight: 600 }} />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                <input type="date" value={draftDate} onChange={e => setDraftDate(e.target.value)} style={{ width: '100%', boxSizing: 'border-box', padding: '6px 8px', fontSize: 12, border: '1px solid var(--line)', borderRadius: 6, background: 'var(--panel)', color: 'var(--ink-1)' }} />
+                <input type="time" value={draftTime || ''} onChange={e => setDraftTime(e.target.value)} style={{ width: '100%', boxSizing: 'border-box', padding: '6px 8px', fontSize: 12, border: '1px solid var(--line)', borderRadius: 6, background: 'var(--panel)', color: 'var(--ink-1)' }} />
               </div>
-            )}
-            {event.address && (
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 5, fontSize: 12, color: 'var(--ink-2)' }}>
-                <MapPin size={12} style={{ marginTop: 2, flexShrink: 0, color: 'var(--ink-3)' }} />
-                <span>{event.address}</span>
+              <input value={draftAddr} onChange={e => setDraftAddr(e.target.value)} placeholder="Location" style={{ width: '100%', boxSizing: 'border-box', padding: '6px 8px', fontSize: 12, border: '1px solid var(--line)', borderRadius: 6, background: 'var(--panel)', color: 'var(--ink-1)' }} />
+              <textarea value={draftNotes} onChange={e => setDraftNotes(e.target.value)} placeholder="Notes" rows={2} style={{ width: '100%', boxSizing: 'border-box', padding: '6px 8px', fontSize: 12, border: '1px solid var(--line)', borderRadius: 6, background: 'var(--panel)', color: 'var(--ink-1)', resize: 'vertical', fontFamily: 'inherit' }} />
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+                <button onClick={() => setMode('view')} disabled={busy} style={popBtn('var(--bg)','var(--ink-2)','var(--line)')}>Cancel</button>
+                <button onClick={saveMeetingEdit} disabled={busy || !draftTitle.trim() || !draftDate} style={popBtn('var(--accent)','#fff','transparent')}>{busy ? 'Saving…' : 'Save'}</button>
               </div>
-            )}
-            {event.notes && (
-              <div style={{ fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.4, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-                {event.notes}
+            </div>
+          ) : (
+            <>
+              <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--ink-1)', marginBottom: 4, paddingRight: 20 }}>{event.title}</div>
+              {event.time && <div style={{ fontSize: 12, color: '#1D9E75', fontWeight: 600, marginBottom: 8 }}>{fmtTime(event.time)}</div>}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {member && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ink-2)' }}>
+                    <MemberAvatar member={member} size={18} />
+                    {member.name}
+                  </div>
+                )}
+                {event.address && (
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 5, fontSize: 12, color: 'var(--ink-2)' }}>
+                    <MapPin size={12} style={{ marginTop: 2, flexShrink: 0, color: 'var(--ink-3)' }} />
+                    <span>{event.address}</span>
+                  </div>
+                )}
+                {event.notes && (
+                  <div style={{ fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.4, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                    {event.notes}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-          <div style={{ marginTop: 10, display: 'flex', gap: 6 }}>
-            <button onClick={onClose} style={{ background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 7, padding: '5px 12px', color: 'var(--ink-2)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
-              Edit
-            </button>
-            <button onClick={onClose} style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 7, padding: '5px 12px', color: '#ef4444', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
-              Delete
-            </button>
-          </div>
+              {mode === 'confirm-delete' ? (
+                <div style={{ marginTop: 10, padding: 8, background: 'rgba(239,68,68,0.08)', borderRadius: 8, fontSize: 12, color: 'var(--ink-2)' }}>
+                  Delete this meeting?
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 8 }}>
+                    <button onClick={() => setMode('view')} disabled={busy} style={popBtn('var(--bg)','var(--ink-2)','var(--line)')}>Keep</button>
+                    <button onClick={deleteMeeting} disabled={busy} style={popBtn('#ef4444','#fff','transparent')}>{busy ? 'Deleting…' : 'Delete'}</button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ marginTop: 10, display: 'flex', gap: 6 }}>
+                  <button onClick={() => setMode('edit')} style={popBtn('var(--bg)','var(--ink-2)','var(--line)')}>Edit</button>
+                  <button onClick={() => setMode('confirm-delete')} style={popBtn('rgba(239,68,68,0.1)','#ef4444','rgba(239,68,68,0.2)')}>Delete</button>
+                </div>
+              )}
+            </>
+          )}
+          {err && <div style={{ marginTop: 8, fontSize: 11, color: 'var(--lose)' }}>{err}</div>}
         </>
       )}
     </div>
   )
+}
+
+function popBtn(bg, fg, border) {
+  return {
+    background: bg, color: fg,
+    border: `1px solid ${border}`,
+    borderRadius: 7, padding: '5px 12px',
+    fontSize: 12, fontWeight: 600, cursor: 'pointer',
+    fontFamily: 'inherit',
+  }
 }
 
 // ── Quick Add Event Modal ─────────────────────────────────────
@@ -423,7 +582,7 @@ function QuickAddEventModal({ initialDate, leads, members, onClose, onSaved }) {
         const lead = leads.find(l => l.id === selectedLead)
         const isoDateTime = time ? `${date}T${time}:00` : `${date}T09:00:00`
 
-        await supabase.from('calendar_events').insert({
+        const { error: insErr } = await supabase.from('calendar_events').insert({
           title: lead?.name || 'Consult',
           event_type: 'consult',
           event_date: date,
@@ -432,6 +591,7 @@ function QuickAddEventModal({ initialDate, leads, members, onClose, onSaved }) {
           assigned_to: assignedTo || null,
           lead_id: selectedLead,
         })
+        if (insErr) { setError(`Failed to save: ${insErr.message}`); setSaving(false); return }
 
         if (lead && lead.status !== 'Consult Scheduled') {
           await supabase.from('leads').update({
@@ -442,18 +602,21 @@ function QuickAddEventModal({ initialDate, leads, members, onClose, onSaved }) {
           await supabase.from('leads').update({ consult_at: isoDateTime }).eq('id', selectedLead)
         }
       } else {
-        await supabase.from('meetings').insert({
-          title: title.trim(),
-          date,
-          time: time || null,
-          address: location || null,
-          notes: notes || null,
-          assignee_id: assignedTo || null,
+        // Save meetings to calendar_events too — single source of truth.
+        const { error: insErr } = await supabase.from('calendar_events').insert({
+          title:       title.trim(),
+          event_type:  'meeting',
+          event_date:  date,
+          event_time:  time || null,
+          address:     location || null,
+          notes:       notes || null,
+          assigned_to: assignedTo || null,
         })
+        if (insErr) { setError(`Failed to save: ${insErr.message}`); setSaving(false); return }
       }
       onSaved()
     } catch (e) {
-      setError('Failed to save. Please try again.')
+      setError(e?.message || 'Failed to save. Please try again.')
     } finally {
       setSaving(false)
     }
@@ -681,26 +844,39 @@ function MonthView({ projects, consults, meetings, viewDate, todayStr, memberMap
                 const isWeekend = date.getDay() === 0 || date.getDay() === 6
                 const isPast = dayStr < todayStr
 
-                // Day capacity calculation
-                const dayProjects = scheduled.filter(p => {
-                  const end = p.project_end || p.project_start
-                  return p.project_start <= dayStr && end >= dayStr
-                })
-                let totalHours = 0
-                dayProjects.forEach(p => {
-                  const start = new Date(p.project_start + 'T00:00:00')
-                  const end = p.project_end ? new Date(p.project_end + 'T00:00:00') : start
-                  const projectDays = Math.max(Math.round((end - start) / 86400000) + 1, 1)
-                  const dailyHours = (p.square_footage ? Math.round(p.square_footage * 0.008) : 8) / projectDays
-                  totalHours += dailyHours
-                })
-                const capacity = activeEmployeeCount * 8
-                const utilization = capacity > 0 ? totalHours / capacity : 0
-
+                // Day capacity utilization — only computed for weekdays.
+                // Total daily hours = sum across active projects of
+                //   labour_hours / project_workdays (skipping weekends).
+                // Capacity = active_employee_count * 8.
                 let capacityBg = 'transparent'
-                if (utilization > 0 && utilization < 0.75) capacityBg = 'rgba(34,197,94,0.06)'
-                else if (utilization >= 0.75 && utilization < 1) capacityBg = 'rgba(245,158,11,0.08)'
-                else if (utilization >= 1) capacityBg = 'rgba(239,68,68,0.08)'
+                if (!isWeekend) {
+                  const dayProjects = scheduled.filter(p => {
+                    const end = p.project_end || p.project_start
+                    return p.project_start <= dayStr && end >= dayStr
+                  })
+                  let totalHours = 0
+                  dayProjects.forEach(p => {
+                    const start = new Date(p.project_start + 'T00:00:00')
+                    const end = p.project_end ? new Date(p.project_end + 'T00:00:00') : start
+                    // Count weekdays inclusive
+                    let workdays = 0
+                    const cur = new Date(start)
+                    while (cur <= end) {
+                      const dow = cur.getDay()
+                      if (dow !== 0 && dow !== 6) workdays++
+                      cur.setDate(cur.getDate() + 1)
+                    }
+                    workdays = Math.max(1, workdays)
+                    const dailyHours = (p.square_footage ? Math.round(p.square_footage * 0.008) : 8) / workdays
+                    totalHours += dailyHours
+                  })
+                  const capacity = activeEmployeeCount * 8
+                  const utilization = capacity > 0 ? totalHours / capacity : 0
+
+                  if (utilization > 0 && utilization < 0.75)      capacityBg = 'rgba(234,243,222,0.5)' // light green #EAF3DE
+                  else if (utilization >= 0.75 && utilization < 1) capacityBg = 'rgba(250,238,218,0.5)' // light amber #FAEEDA
+                  else if (utilization >= 1)                       capacityBg = 'rgba(252,235,235,0.55)' // light red  #FCEBEB
+                }
 
                 const baseBg = isToday
                   ? 'rgba(59,130,246,0.06)'
@@ -1397,7 +1573,6 @@ export default function Schedule() {
   const [viewDate, setViewDate] = useState(new Date())
   const [activeView, setActiveView] = useState('month')
   const [selectedProject, setSelectedProject] = useState(null)
-  const [showNewMeeting, setShowNewMeeting] = useState(false)
   const [showExport, setShowExport] = useState(false)
   const [showSync, setShowSync] = useState(false)
   const [showTypes, setShowTypes] = useState({ projects: true, consults: true, meetings: true })
@@ -1406,13 +1581,42 @@ export default function Schedule() {
   const [popoverRect, setPopoverRect] = useState(null)
   const isMobile = useIsMobile()
   const { members } = useTeam()
+  const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
 
   useEffect(() => { fetchProjects() }, [])
+
+  // URL params: ?action=addEvent opens the Add Event modal; ?view=day|week|month
+  useEffect(() => {
+    const action = searchParams.get('action')
+    const viewParam = searchParams.get('view')
+    let consumed = false
+    if (action === 'addEvent') {
+      setQuickAddDate('')
+      consumed = true
+    }
+    if (viewParam === 'day') {
+      // Schedule has Month/Week/List — closest match for "day" is Week
+      setActiveView('week')
+      setViewDate(new Date())
+      consumed = true
+    } else if (viewParam === 'month' || viewParam === 'week' || viewParam === 'list') {
+      setActiveView(viewParam)
+      consumed = true
+    }
+    if (consumed) {
+      const next = new URLSearchParams(searchParams)
+      next.delete('action')
+      next.delete('view')
+      setSearchParams(next, { replace: true })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   async function fetchProjects() {
     setLoading(true)
     try {
-      const [{ data: leadsData }, { data: meetingsRaw }, { data: calEventsRaw }] = await Promise.all([
+      const [leadsRes, meetingsRes, calEventsRes] = await Promise.all([
         supabase.from('leads')
           .select('id,name,address,job_type,square_footage,density,project_start,project_end,crew_size,status,deal_score,consult_at,assigned_to,what_they_need,lead_source')
           .not('status', 'eq', 'Lost')
@@ -1421,13 +1625,15 @@ export default function Schedule() {
         supabase.from('calendar_events').select('*').order('event_date', { ascending: true }),
       ])
 
-      setProjects((leadsData || []).map(p => ({
+      setProjects((leadsRes.data || []).map(p => ({
         ...p,
         project_start: p.project_start ? p.project_start.slice(0, 10) : null,
         project_end: p.project_end ? p.project_end.slice(0, 10) : null,
       })))
-      setMeetingsData(meetingsRaw || [])
-      setCalEventsData(calEventsRaw || [])
+      // The legacy `meetings` table is optional. If it doesn't exist (42P01),
+      // we silently fall back to calendar_events only.
+      setMeetingsData(meetingsRes.error ? [] : (meetingsRes.data || []))
+      setCalEventsData(calEventsRes.error ? [] : (calEventsRes.data || []))
     } finally {
       setLoading(false)
     }
@@ -1436,7 +1642,6 @@ export default function Schedule() {
   const todayStr = toDateStr(new Date())
   const memberMap = Object.fromEntries(members.map(m => [m.id, m]))
   const scheduledProjects = projects.filter(p => p.project_start)
-  const unscheduled = projects.filter(p => !p.project_start && !p.consult_at)
 
   // ── Merged consults (deduplicated by lead_id) ─────────────────
   const mergedConsults = (() => {
@@ -1589,14 +1794,6 @@ export default function Schedule() {
               <Plus size={14} />
               {!isMobile && 'Add Event'}
             </button>
-
-            <button
-              onClick={() => setShowNewMeeting(true)}
-              style={{ background: 'linear-gradient(135deg,#1e3a5f,#2563eb)', border: 'none', borderRadius: 8, padding: '7px 14px', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}
-            >
-              <Plus size={14} />
-              {!isMobile && 'Meeting'}
-            </button>
           </div>
         </div>
 
@@ -1629,14 +1826,6 @@ export default function Schedule() {
           </div>
         )}
 
-        {unscheduled.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 7, padding: '7px 12px', marginTop: 10, fontSize: 12 }}>
-            <AlertCircle size={13} color="#f59e0b" style={{ flexShrink: 0 }} />
-            <span style={{ color: '#f59e0b', fontWeight: 600 }}>{unscheduled.length} project{unscheduled.length !== 1 ? 's' : ''} need dates:</span>
-            <span style={{ color: 'var(--ink-2)' }}>{unscheduled.map(p => p.name).join(', ')}</span>
-            <span style={{ color: 'var(--ink-3)' }}>— open the lead in Pipeline to set dates</span>
-          </div>
-        )}
       </div>
 
       {/* ── Calendar body ─────────────────────────────────────── */}
@@ -1707,9 +1896,6 @@ export default function Schedule() {
           onSave={handleProjectSave}
         />
       )}
-      {showNewMeeting && (
-        <NewMeetingModal onClose={() => setShowNewMeeting(false)} onSave={() => { setShowNewMeeting(false); fetchProjects() }} />
-      )}
       {showExport && (
         <ExportModal projects={scheduledProjects} days={monthDays} onClose={() => setShowExport(false)} />
       )}
@@ -1731,6 +1917,9 @@ export default function Schedule() {
           anchorRect={popoverRect}
           memberMap={memberMap}
           onClose={() => { setPopoverEvent(null); setPopoverRect(null) }}
+          onChanged={fetchProjects}
+          onOpenLead={leadId => navigate(`/pipeline?lead=${leadId}`)}
+          onOpenProject={p => setSelectedProject(p)}
         />
       )}
     </div>

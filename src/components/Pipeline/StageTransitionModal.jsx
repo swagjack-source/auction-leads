@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { X } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useTeam } from '../../lib/TeamContext'
+import logger from '../../lib/logger'
 
 export function needsTransitionPrompt(toStage) {
   return ['Contacted', 'Consult Scheduled', 'Consult Completed', 'Lost', 'Backlog'].includes(toStage)
@@ -58,6 +59,7 @@ function ConsultScheduledPanel({ lead, onConfirm, onCancel }) {
   const [address, setAddress] = useState(lead.address || '')
   const [employees, setEmployees] = useState([])
   const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     supabase
@@ -79,20 +81,33 @@ function ConsultScheduledPanel({ lead, onConfirm, onCancel }) {
       return
     }
     setError('')
-    await supabase.from('calendar_events').insert({
-      title: `Consult: ${lead.name}`,
-      event_date: date,
-      event_time: time,
-      event_type: 'consult',
-      address,
-      assigned_to: assignedTo,
-      lead_id: lead.id,
-    })
-    onConfirm({
-      consult_at: `${date}T${time}:00`,
-      assigned_to: assignedTo,
-      address,
-    })
+    setSaving(true)
+    try {
+      const { error: calErr } = await supabase.from('calendar_events').insert({
+        title: `Consult: ${lead.name}`,
+        event_date: date,
+        event_time: time,
+        event_type: 'consult',
+        address,
+        assigned_to: assignedTo,
+        lead_id: lead.id,
+      })
+      if (calErr) {
+        logger.error('Consult calendar_events insert failed', calErr)
+        setError(`Could not save calendar event: ${calErr.message}`)
+        setSaving(false)
+        return
+      }
+      onConfirm({
+        consult_at: `${date}T${time}:00`,
+        assigned_to: assignedTo,
+        address,
+      })
+    } catch (e) {
+      logger.error('Consult schedule threw', e)
+      setError(e?.message || 'Failed to schedule consult.')
+      setSaving(false)
+    }
   }
 
   return (
@@ -128,8 +143,10 @@ function ConsultScheduledPanel({ lead, onConfirm, onCancel }) {
         />
       </div>
       <div style={footerStyle}>
-        <button onClick={onCancel} style={ghostBtn}>Cancel</button>
-        <button onClick={handleSchedule} style={accentBtn}>Schedule</button>
+        <button onClick={onCancel} style={ghostBtn} disabled={saving}>Cancel</button>
+        <button onClick={handleSchedule} disabled={saving} style={saving ? { ...accentBtn, opacity: 0.6 } : accentBtn}>
+          {saving ? 'Scheduling…' : 'Schedule'}
+        </button>
       </div>
     </>
   )
@@ -398,7 +415,7 @@ const accentBtn = {
   fontSize: 13, fontWeight: 600,
   background: 'var(--accent)',
   border: 'none',
-  color: 'var(--accent-ink)',
+  color: '#FFFFFF',
   cursor: 'pointer',
 }
 

@@ -82,11 +82,12 @@ describe('calculateDeal', () => {
     expect(result.size).toBe('Medium')
   })
 
-  it('overhead is 30% of labour cost', () => {
-    // OVERHEAD_PCT updated to 0.30 based on CT Denver SE P&L actuals
-    // (fuel, supplies, disposal, insurance avg 30% — Cathy Redeker 35%, Kim Valentine 23%)
+  it('overhead is 15% of labour cost', () => {
+    // Phase 5: lowered to 0.15. Big fixed costs (dumpsters) are baked into
+    // the cleanout bid range itself, so overhead now only covers small
+    // consumables / fuel.
     const result = calculateDeal(base)
-    expect(result.overheadCost).toBe(Math.round(result.labourCost * 0.30))
+    expect(result.overheadCost).toBe(Math.round(result.labourCost * 0.15))
   })
 
   it('totalCost = labourCost + overheadCost', () => {

@@ -131,6 +131,11 @@ const LeadCard = memo(function LeadCard({
     )
   }
 
+  // Lost cards get a muted, gray-bordered look so they're clearly dead
+  const isLost = lead.status === 'Lost'
+  const lostBg = '#F7F7F5'
+  const lostBorder = '#D1D5DB'
+
   return (
     <article
       onPointerDown={onPointerDown}
@@ -138,8 +143,9 @@ const LeadCard = memo(function LeadCard({
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
-        background: 'var(--panel)',
+        background: isLost ? lostBg : 'var(--panel)',
         border: `1px solid ${hover ? (stageTint || 'var(--line)') : 'var(--line)'}`,
+        borderLeft: isLost ? `3px solid ${lostBorder}` : `1px solid ${hover ? (stageTint || 'var(--line)') : 'var(--line)'}`,
         borderRadius: 12,
         padding: '10px 11px',
         cursor: 'grab',
@@ -151,6 +157,7 @@ const LeadCard = memo(function LeadCard({
         userSelect: 'none',
         touchAction: 'none',
         flexShrink: 0,
+        opacity: isLost ? 0.7 : 1,
       }}
     >
       {/* Row 1: Badges */}
@@ -190,6 +197,22 @@ const LeadCard = memo(function LeadCard({
           {lead.address || 'No address added'}
         </span>
       </div>
+
+      {/* Loss reason — only on Lost cards */}
+      {isLost && lead.loss_reason && (
+        <span style={{
+          display: 'inline-block',
+          alignSelf: 'flex-start',
+          fontSize: 11, fontWeight: 600,
+          color: '#791F1F',
+          background: '#FCEBEB',
+          padding: '2px 8px',
+          borderRadius: 999,
+          marginTop: 2,
+        }}>
+          {lead.loss_reason}
+        </span>
+      )}
 
       {/* Row 4: Score + Bid */}
       {showScoreRow && (

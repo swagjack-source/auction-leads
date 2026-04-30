@@ -37,25 +37,71 @@ export function estimateLabourHours(sqft, density) {
 }
 
 const HOURLY_RATE = 22
-// Overhead averages 30–35% of labour (fuel, supplies, disposal, insurance)
-// Source: CT Denver SE P&L — Cathy Redeker 35%, Kim Valentine 23%, avg ~30%
-const OVERHEAD_PCT = 0.30
+// Overhead is ~15% on top of labour cost (small consumables, fuel, etc.).
+// Larger fixed costs (dumpsters) are baked into the cleanout bid range itself.
+const OVERHEAD_PCT = 0.15
 // CT franchise royalty — confirmed 8.0% across all P&L records
 export const ROYALTY_PCT = 0.08
 
-// Clean Out base bid ranges by property size
-// Source: 51 real Cedar Operations scope agreements + reconciliations (2025–2026)
-//   Small  → garages, studios, small apts
-//   Medium → standard 2–3 bed homes
-//   Large  → large homes, estates, full relocations
-const BID_RANGES = {
-  Small:  { min: 1500, max: 4000  },
-  Medium: { min: 4000, max: 8500  },
-  Large:  { min: 8500, max: 15000 },
-}
+/**
+ * Real-pricing bid calculator (Phase 5).
+ *
+ * Returns { bid, dumpsters } per the calibration:
+ *   - Auction:                   flat $3,000  (cap)
+ *   - In-Person Sale:            flat $2,500
+ *   - Move:                      $3k / $3.5k / $4k by sqft
+ *   - Clean Out:                 $4,500–$8,500 scaled by density × sqft
+ *                                (dumpsters $500 each, 1 normal / 2 high — included)
+ *   - Both (Clean Out+Auction):  cleanout + $3,000 auction
+ *   - Sorting/Organizing:        $1.5k / $2.5k / $3.5k by sqft
+ */
+export function calculateBid(jobType, sqft, density /* quality unused for now */) {
+  let bid = 0
+  let dumpsters = 0
 
-// For Auction-only jobs, bid is lower (no labour-intensive cleanout)
-const AUCTION_DISCOUNT = 0.75
+  switch (jobType) {
+    case 'Auction':
+    case 'In-person Estate Sale':
+      bid = jobType === 'Auction' ? 3000 : 2500
+      break
+
+    case 'Move':
+      if (sqft <= 1500)      bid = 3000
+      else if (sqft <= 2500) bid = 3500
+      else                   bid = 4000
+      break
+
+    case 'Sorting/Organizing':
+      if (sqft <= 1500)      bid = 1500
+      else if (sqft <= 2500) bid = 2500
+      else                   bid = 3500
+      break
+
+    case 'Both': {
+      // Clean Out portion + flat $3,000 auction add-on
+      const co = calculateBid('Clean Out', sqft, density)
+      bid = co.bid + 3000
+      dumpsters = co.dumpsters
+      break
+    }
+
+    case 'Clean Out':
+    default: {
+      const densityMultiplier =
+        density === 'Low'    ? 0.6 :
+        density === 'High'   ? 1.0 : 0.8 // Medium / unknown
+      const sqftFactor = Math.min(sqft / 3000, 1.5)
+      bid = 4500 + (4000 * sqftFactor * densityMultiplier)
+      bid = Math.round(bid / 100) * 100
+      bid = Math.max(4500, Math.min(8500, bid))
+      // Dumpster count for reference; cost is already in the $4,500–$8,500 range
+      dumpsters = density === 'High' ? 2 : 1
+      break
+    }
+  }
+
+  return { bid: Math.round(bid), dumpsters, dumpsterCost: dumpsters * 500 }
+}
 
 export function calculateDeal({ sqft, density, itemQuality, jobType, zipCode }) {
   const size = getSizeBucket(sqft)
@@ -64,28 +110,22 @@ export function calculateDeal({ sqft, density, itemQuality, jobType, zipCode }) 
   const overheadCost = labourCost * OVERHEAD_PCT
   const totalCost = labourCost + overheadCost
 
-  // Recommended bid
-  const range = BID_RANGES[size]
-  const densityMultiplier = { Low: 0, Medium: 0.5, High: 1 }[density]
-  const rawBid = range.min + (range.max - range.min) * densityMultiplier
+  // Bid from the new real-pricing rules
+  const { bid: bidRaw, dumpsters, dumpsterCost } = calculateBid(jobType, Number(sqft) || 0, density)
 
-  let recommendedBid = rawBid
-  if (jobType === 'Auction')               recommendedBid = rawBid * AUCTION_DISCOUNT
-  if (jobType === 'Both')                  recommendedBid = rawBid * 1.15
-  if (jobType === 'Move')                  recommendedBid = rawBid * 0.90
-  if (jobType === 'In-person Estate Sale') recommendedBid = rawBid * 1.05
-
-  // Item quality affects auction revenue potential:
-  // quality 1 = 0.75x, quality 5 ≈ 0.97x, quality 7 ≈ 1.08x, quality 10 = 1.25x
-  const qualityFactor = 0.75 + (itemQuality - 1) * (0.5 / 9)
+  // Item quality nudges auction-driven revenue. Clean Out / Move / Sorting
+  // are flat-rate services so quality doesn't move the bid.
+  const qualityFactor = 0.75 + ((Number(itemQuality) || 5) - 1) * (0.5 / 9)
+  let recommendedBid = bidRaw
   if (jobType === 'Auction' || jobType === 'In-person Estate Sale') {
     recommendedBid = recommendedBid * qualityFactor
   } else if (jobType === 'Both') {
-    recommendedBid = recommendedBid * (0.5 + qualityFactor * 0.5)
+    // Quality only modulates the auction portion. Cleanout portion is fixed.
+    const cleanoutPortion = bidRaw - 3000
+    const auctionPortion = 3000 * qualityFactor
+    recommendedBid = cleanoutPortion + auctionPortion
   }
-  // Clean Out / Move: quality doesn't affect the service fee
-
-  recommendedBid = Math.round(recommendedBid / 100) * 100  // round to nearest $100
+  recommendedBid = Math.round(recommendedBid / 100) * 100
 
   const estimatedProfit = recommendedBid - totalCost
   const profitMarginPct = (estimatedProfit / recommendedBid) * 100
@@ -134,6 +174,8 @@ export function calculateDeal({ sqft, density, itemQuality, jobType, zipCode }) 
     overheadCost: Math.round(overheadCost),
     totalCost: Math.round(totalCost),
     recommendedBid,
+    dumpsters,
+    dumpsterCost,
     estimatedProfit: Math.round(estimatedProfit),
     profitMarginPct: Math.round(profitMarginPct * 10) / 10,
     dealScore: finalScore,

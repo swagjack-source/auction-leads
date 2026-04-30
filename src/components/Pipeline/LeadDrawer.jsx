@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { getScoreColor, getScoreLabel } from '../../lib/scoring'
 import { supabase } from '../../lib/supabase'
 import { PIPELINE_STAGES } from '../../lib/constants'
+import { useTeam } from '../../lib/TeamContext'
 import SendEstimateModal from './SendEstimateModal'
 import ScheduleProjectModal from './ScheduleProjectModal'
 import AttachmentsSection from './AttachmentsSection'
@@ -64,6 +65,7 @@ function SectionTitle({ children }) {
 
 export default function LeadDrawer({ lead, onClose, onEdit, onMoveStatus, onChecklistChange, onDelete }) {
   const navigate = useNavigate()
+  const { members } = useTeam()
   const [checklist, setChecklist] = useState(() => {
     if (Array.isArray(lead?.checklist) && lead.checklist.length > 0) return lead.checklist
     return DEFAULT_CHECKLIST.map(item => ({ label: item, done: false }))
@@ -184,7 +186,7 @@ export default function LeadDrawer({ lead, onClose, onEdit, onMoveStatus, onChec
           </button>
           <button
             key="scorer"
-            onClick={() => navigate('/scorer', { state: { lead } })}
+            onClick={() => navigate(`/projects?openScorer=true&leadId=${lead.id}`)}
             style={primaryBtn('#4A6FA5')}
           >
             <Calculator size={13} strokeWidth={1.8} /> Deal Scorer
@@ -429,6 +431,62 @@ export default function LeadDrawer({ lead, onClose, onEdit, onMoveStatus, onChec
             </div>
             <span style={{ fontSize: 11.5, color: 'var(--ink-4)' }}>Owner · Margaret Reyes</span>
           </div>
+
+          {/* Lost-reason info card */}
+          {lead.status === 'Lost' && lead.loss_reason && (
+            <div style={{
+              marginTop: 10,
+              padding: '8px 12px',
+              background: '#FCEBEB',
+              borderLeft: '3px solid #EF4444',
+              borderRadius: 8,
+              fontSize: 12.5, color: '#791F1F', fontWeight: 600,
+            }}>
+              Lost — {lead.loss_reason}
+            </div>
+          )}
+
+          {/* Consult info card — visible for Consult Scheduled / Consult Completed */}
+          {(lead.status === 'Consult Scheduled' || lead.status === 'Consult Completed') && lead.consult_at && (() => {
+            const dt = new Date(lead.consult_at)
+            const dateStr = dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+            const timeStr = dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+            const consultMember = lead.assigned_to ? members.find(m => String(m.id) === String(lead.assigned_to)) : null
+            return (
+              <div style={{
+                marginTop: 10,
+                padding: '10px 12px',
+                background: '#EEEDFE',
+                borderLeft: '3px solid #7C3AED',
+                borderRadius: 8,
+              }}>
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: '#3C3489', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>
+                  {lead.status === 'Consult Completed' ? 'Consult complete' : 'Consult'}
+                </div>
+                <div style={{ fontSize: 13, color: 'var(--ink-1)', fontWeight: 600 }}>
+                  {dateStr} · {timeStr}
+                </div>
+                {lead.address && (
+                  <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <MapPin size={11} strokeWidth={1.8} />
+                    <span>{lead.address}</span>
+                    {mapsUrl && (
+                      <a href={mapsUrl} target="_blank" rel="noopener noreferrer"
+                        style={{ marginLeft: 'auto', color: '#3C3489', fontWeight: 600, textDecoration: 'none', fontSize: 11.5 }}
+                      >
+                        Get Directions →
+                      </a>
+                    )}
+                  </div>
+                )}
+                {consultMember && (
+                  <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 4 }}>
+                    Assigned to: <span style={{ color: 'var(--ink-2)', fontWeight: 600 }}>{consultMember.name}</span>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
         </div>
 
         {/* Scrollable body */}
