@@ -3,6 +3,7 @@ import { Search, TrendingUp, AlertTriangle, Sparkles, Download, Upload, X, Arrow
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
 } from 'recharts'
+import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
 import CTBidsLiveTab from './CTBidsLiveTab'
 import CTBidsIntelligenceTab from './CTBidsIntelligenceTab'
@@ -24,14 +25,47 @@ function clearImport() {
 }
 
 /**
- * Parse a CTSeller item-level CSV export into the CT_DATA shape.
- * Flexible column detection — handles various CTSeller export formats.
+ * Parse one row of object-keyed data into a normalized item.
+ * Used by both CSV and XLSX import paths. The input row is expected
+ * to be { header_name: value } with headers in their original casing.
  */
-function parseCTSellerCSV(text) {
+function parseItemRow(row) {
+  // Build a lowercased lookup so column-name matching is case-insensitive.
+  const lc = {}
+  for (const k of Object.keys(row)) lc[String(k).toLowerCase().trim()] = row[k]
+
+  function col(...candidates) {
+    for (const c of candidates) {
+      const v = lc[c]
+      if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim()
+    }
+    return ''
+  }
+
+  const price  = parseFloat(col('final price', 'sale price', 'winning bid', 'amount', 'price', 'sold price', 'final bid').replace(/[$,]/g, '')) || 0
+  const bids   = parseInt(col('bids', 'number of bids', 'bid count', 'total bids'), 10) || 0
+  const views  = parseInt(col('views', 'page views', 'view count', 'total views', 'number of views'), 10) || 0
+  const cat    = col('category', 'cat', 'item category', 'lot category', 'category name') || 'Other'
+  const name   = col('title', 'name', 'item', 'lot title', 'item title', 'description', 'lot description', 'item name')
+  const method = col('fulfillment', 'method', 'pickup or shipping', 'delivery', 'shipping method', 'item receipt method').toLowerCase()
+  const paidRaw= col('paid', 'payment status', 'invoice paid', 'invoice status').toLowerCase()
+  const paid   = paidRaw === 'yes' || paidRaw === 'paid' || paidRaw === '1' || paidRaw === 'true'
+  const auction= col('auction', 'auction name', 'auction title', 'sale', 'sale name', 'event', 'sale title')
+  const dateRaw= col('end date', 'date', 'auction date', 'close date', 'end', 'sale end date', 'item close time')
+  const month  = dateRaw ? new Date(dateRaw).toLocaleString('en-US', { month: 'long' }) : ''
+  const year   = dateRaw ? new Date(dateRaw).getFullYear() : null
+  const isPickup = method.includes('pick')
+  return { price, bids, views, cat, name, method: isPickup ? 'pickup' : 'shipping', paid, auction, month, year }
+}
+
+/**
+ * Parse CSV text → array of {header: value} rows.
+ */
+function csvTextToRows(text) {
   const lines = text.trim().split(/\r?\n/)
   if (lines.length < 2) throw new Error('File appears empty')
 
-  function parseRow(line) {
+  function parseLine(line) {
     const cells = []
     let cur = '', inQ = false
     for (let i = 0; i < line.length; i++) {
@@ -44,40 +78,82 @@ function parseCTSellerCSV(text) {
     return cells
   }
 
-  const headers = parseRow(lines[0]).map(h => h.toLowerCase().trim())
+  const headers = parseLine(lines[0])
+  const rows = []
+  for (let i = 1; i < lines.length; i++) {
+    const cells = parseLine(lines[i])
+    if (cells.length <= 1 && !cells.some(c => c.trim())) continue
+    const obj = {}
+    headers.forEach((h, j) => { obj[h] = cells[j] ?? '' })
+    rows.push(obj)
+  }
+  return rows
+}
 
-  function col(row, ...candidates) {
-    for (const c of candidates) {
-      const idx = headers.indexOf(c)
-      if (idx !== -1 && row[idx] !== undefined) return row[idx].trim()
+/**
+ * Read an XLSX file → array of {header: value} rows.
+ * Concatenates rows from EVERY sheet that contains item-level data
+ * (detected by the presence of a Sale Price / Item Name column).
+ */
+function xlsxArrayBufferToRows(arrayBuffer) {
+  const wb = XLSX.read(arrayBuffer, { type: 'array' })
+  const allRows = []
+  // Track items we've already seen so duplicate "summary" sheets that
+  // shadow the canonical data sheet don't double-count revenue.
+  // Key on Item ID when present; otherwise (item_name|sale_price) is
+  // the next-best dedupe key.
+  const seen = new Set()
+
+  for (const sheetName of wb.SheetNames) {
+    const ws = wb.Sheets[sheetName]
+    const sheetRows = XLSX.utils.sheet_to_json(ws, { defval: '' })
+    if (sheetRows.length === 0) continue
+
+    const headers = Object.keys(sheetRows[0]).map(h => String(h).toLowerCase().trim())
+    const hasPrice    = headers.some(h => ['sale price','final price','price','winning bid','sold price','final bid','amount'].includes(h))
+    const hasName     = headers.some(h => ['item name','title','name','item','lot title','item title','description','lot description'].includes(h))
+    // A real auction-data sheet also has at least one of these context
+    // columns. This filters out trimmed "Sale Prices" / pivot-style sheets
+    // that just summarize prices without auction or date context.
+    const hasContext  = headers.some(h => [
+      'item id', 'sale title', 'sale end date', 'sale start date',
+      'end date', 'item close time', 'auction', 'auction name',
+      'auction title', 'invoice number', 'sale name'
+    ].includes(h))
+
+    if (!hasPrice || !hasName || !hasContext) continue
+
+    for (const r of sheetRows) {
+      const lc = {}
+      for (const k of Object.keys(r)) lc[String(k).toLowerCase().trim()] = r[k]
+      const itemId = String(lc['item id'] ?? '').trim()
+      const dedupeKey = itemId
+        ? `id:${itemId}`
+        : `np:${String(lc['item name'] ?? lc['title'] ?? '').trim()}|${String(lc['sale price'] ?? lc['final price'] ?? lc['price'] ?? '').trim()}`
+      if (dedupeKey === 'id:' || dedupeKey === 'np:|') continue // empty row
+      if (seen.has(dedupeKey)) continue
+      seen.add(dedupeKey)
+      allRows.push(r)
     }
-    return ''
+  }
+  return allRows
+}
+
+/**
+ * Parse a CTSeller item-level export (CSV or XLSX) into the CT_DATA shape.
+ * Flexible column detection — handles various CTSeller export formats.
+ *
+ * @param {{ rows: Array<Object> }} input  pre-parsed rows-of-objects
+ * @returns the parsed dataset
+ */
+function buildCTDataFromRows(rawRows) {
+  if (!rawRows || rawRows.length === 0) {
+    throw new Error('No data rows found in file')
   }
 
-  const rows = lines.slice(1)
-    .map(l => parseRow(l))
-    .filter(r => r.length > 1 && r.some(c => c.trim()))
+  const items = rawRows.map(parseItemRow).filter(i => i.price > 0)
 
-  if (rows.length === 0) throw new Error('No data rows found in file')
-
-  const items = rows.map(r => {
-    const price  = parseFloat(col(r, 'final price', 'sale price', 'winning bid', 'amount', 'price', 'sold price', 'final bid').replace(/[$,]/g, '')) || 0
-    const bids   = parseInt(col(r, 'bids', 'number of bids', 'bid count', 'total bids'), 10) || 0
-    const views  = parseInt(col(r, 'views', 'page views', 'view count', 'total views'), 10) || 0
-    const cat    = col(r, 'category', 'cat', 'item category', 'lot category') || 'Other'
-    const name   = col(r, 'title', 'name', 'item', 'lot title', 'item title', 'description', 'lot description')
-    const method = col(r, 'fulfillment', 'method', 'pickup or shipping', 'delivery', 'shipping method').toLowerCase()
-    const paidRaw= col(r, 'paid', 'payment status', 'invoice paid', 'invoice status').toLowerCase()
-    const paid   = paidRaw === 'yes' || paidRaw === 'paid' || paidRaw === '1' || paidRaw === 'true'
-    const auction= col(r, 'auction', 'auction name', 'auction title', 'sale', 'sale name', 'event')
-    const dateRaw= col(r, 'end date', 'date', 'auction date', 'close date', 'end')
-    const month  = dateRaw ? new Date(dateRaw).toLocaleString('en-US', { month: 'long' }) : ''
-    const year   = dateRaw ? new Date(dateRaw).getFullYear() : null
-    const isPickup = method.includes('pick')
-    return { price, bids, views, cat, name, method: isPickup ? 'pickup' : 'shipping', paid, auction, month, year }
-  }).filter(i => i.price > 0)
-
-  if (items.length === 0) throw new Error('No items with valid prices found. Check that the CSV has a "Final Price" or "Sale Price" column.')
+  if (items.length === 0) throw new Error('No items with valid prices found. Check that the file has a "Sale Price" or "Final Price" column.')
 
   const totalItems  = items.length
   const totalRev    = items.reduce((s, i) => s + i.price, 0)
@@ -1076,18 +1152,31 @@ export default function CTBids() {
     const file = e.target.files?.[0]
     if (!file) return
     e.target.value = ''
+
+    const isXlsx = /\.(xlsx|xls)$/i.test(file.name)
     const reader = new FileReader()
+
     reader.onload = (ev) => {
       try {
-        const parsed = parseCTSellerCSV(ev.target.result)
+        const rawRows = isXlsx
+          ? xlsxArrayBufferToRows(ev.target.result)
+          : csvTextToRows(ev.target.result)
+        if (rawRows.length === 0) {
+          throw new Error(isXlsx
+            ? 'No item-data sheets found. Each sheet needs Sale Price + Item Name columns.'
+            : 'File appears empty')
+        }
+        const parsed = buildCTDataFromRows(rawRows)
         saveImport(parsed)
         setImportedData(parsed)
         setImportError(null)
       } catch (err) {
-        setImportError(err.message || 'Failed to parse CSV')
+        setImportError(err.message || `Failed to parse ${isXlsx ? 'spreadsheet' : 'CSV'}`)
       }
     }
-    reader.readAsText(file)
+
+    if (isXlsx) reader.readAsArrayBuffer(file)
+    else        reader.readAsText(file)
   }
 
   function handleClearImport() {
@@ -1110,7 +1199,7 @@ export default function CTBids() {
       `}</style>
 
       {/* Hidden file input */}
-      <input ref={fileRef} type="file" accept=".csv,.txt" style={{ display: 'none' }} onChange={handleImport} />
+      <input ref={fileRef} type="file" accept=".csv,.txt,.xlsx,.xls" style={{ display: 'none' }} onChange={handleImport} />
 
       {/* Page header */}
       <div style={{ padding: '22px 28px 16px', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
