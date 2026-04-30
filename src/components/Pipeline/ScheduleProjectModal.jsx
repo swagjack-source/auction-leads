@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { X, CalendarDays, Users } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import { useAuth } from '../../lib/AuthContext'
 import { estimateLabourHours } from '../../lib/scoring'
 import logger from '../../lib/logger'
 
@@ -15,6 +16,7 @@ function addWorkdays(startDateStr, days) {
 }
 
 export default function ScheduleProjectModal({ lead, onClose, onScheduled }) {
+  const { organizationId } = useAuth()
   const [startDate, setStartDate]   = useState('')
   const [employees, setEmployees]   = useState([])
   const [teamFallback, setTeamFallback] = useState(false)
@@ -98,11 +100,13 @@ export default function ScheduleProjectModal({ lead, onClose, onScheduled }) {
     }
 
     // Insert project_assignments for each checked employee
+    // organization_id is required by the RLS policy WITH CHECK clause.
     if (assignedIds.length > 0) {
       const rows = assignedIds.map(employee_id => ({
         lead_id: lead.id,
         employee_id,
         estimated_hours: labourHours / Math.max(1, assignedIds.length),
+        organization_id: organizationId,
       }))
       const { error: paErr } = await supabase.from('project_assignments').insert(rows)
       if (paErr) logger.error('project_assignments insert failed', paErr)

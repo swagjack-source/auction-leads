@@ -378,6 +378,7 @@ function AssignCrewExpansion({
   projects,
   onConfirm, onCancel,
 }) {
+  const { organizationId } = useAuth()
   const hrs = estimateLabourHours(project.square_footage||1200, project.density||'Medium')
   const neededCrew = estimateCrew(project.square_footage||1200, project.density||'Medium', project.job_type||'Clean Out')
 
@@ -446,11 +447,13 @@ function AssignCrewExpansion({
         .delete().eq('lead_id', project.id)
       if (delErr) throw delErr
 
-      // Insert new
+      // Insert new — organization_id is required by the RLS policy on
+      // project_assignments (WITH CHECK organization_id IN user_orgs()).
       const rows = selectedArr.map(eid => ({
         lead_id: project.id,
         employee_id: eid,
         estimated_hours: getHrsForEmp(eid),
+        organization_id: organizationId,
       }))
       if (rows.length > 0) {
         const { error: insErr } = await supabase.from('project_assignments').insert(rows)
@@ -1272,7 +1275,7 @@ export default function CrewSchedule() {
 
   function handleAssignConfirm(pid, empIds, hoursMap, err) {
     if (err) {
-      showToast('Failed to save crew assignment', 'error')
+      showToast(`Crew assign failed: ${err}`, 'error')
       return
     }
     const p = projects.find(x=>x.id===pid)
