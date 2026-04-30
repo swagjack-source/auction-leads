@@ -1261,7 +1261,7 @@ export default function CTBids() {
         <CTTab active={tab === 'live'} onClick={() => setTab('live')} label="Live Auction" liveDot={hasActiveLive} />
         <CTTab active={tab === 'auctions'} onClick={() => setTab('auctions')} label="Auctions" count={D.sales.length} />
         <CTTab active={tab === 'categories'} onClick={() => setTab('categories')} label="Categories" count={D.categories.length} />
-        <CTTab active={tab === 'items'} onClick={() => setTab('items')} label="Items" count={D.topItems.length} />
+        <CTTab active={tab === 'items'} onClick={() => setTab('items')} label="Items" count={(D.allItems || D.topItems || []).length} />
         <CTTab active={tab === 'intelligence'} onClick={() => setTab('intelligence')} label="Intelligence" />
       </div>
 
