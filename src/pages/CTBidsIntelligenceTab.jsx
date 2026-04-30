@@ -3,7 +3,7 @@ import { TrendingUp, TrendingDown } from 'lucide-react'
 import {
   LineChart, Line, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  ResponsiveContainer, Cell,
+  ResponsiveContainer, Cell, ReferenceLine,
   PieChart, Pie,
 } from 'recharts'
 import { PROFIT_THRESHOLD } from './CTBids'
