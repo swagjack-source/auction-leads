@@ -2,11 +2,12 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import {
   X, MapPin, MoreHorizontal, Pencil, CheckCircle, Trash2,
   Users, Plus, Star, Image as ImageIcon, FileText,
-  CheckSquare, Square,
+  CheckSquare, Square, UserPlus, Calendar,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../lib/AuthContext'
 import { getChecklistForType, checklistProgress } from '../../lib/checklists'
+import { PROJECT_EVENT_TYPES } from '../../lib/constants'
 import logger from '../../lib/logger'
 import ConvertToActiveModal from './ConvertToActiveModal'
 import MarkCompleteModal from './MarkCompleteModal'
@@ -110,7 +111,7 @@ function Section({ children, style }) {
 
 // ── 1. Header ────────────────────────────────────────────────
 
-function HeaderSection({ project, timeline, onEdit, onMarkComplete, onDelete, onClose }) {
+function HeaderSection({ project, timeline, onEdit, onMarkComplete, onDelete, onClose, onSaveAsClient, clientState }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const menuRef = useRef(null)
@@ -171,6 +172,11 @@ function HeaderSection({ project, timeline, onEdit, onMarkComplete, onDelete, on
           {menuOpen && (
             <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 6, zIndex: 80, background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, boxShadow: 'var(--shadow-2)', minWidth: 180, overflow: 'hidden' }}>
               <MenuItem icon={Pencil} label="Edit Details" onClick={() => { setMenuOpen(false); onEdit() }} />
+              <MenuItem
+                icon={UserPlus}
+                label={clientState === 'saved' ? 'Saved as Client ✓' : clientState === 'exists' ? 'Already a contact' : 'Save as Client'}
+                onClick={() => { setMenuOpen(false); onSaveAsClient() }}
+              />
               {timeline.kind !== 'completed' && (
                 <MenuItem icon={CheckCircle} label="Mark Complete" onClick={() => { setMenuOpen(false); onMarkComplete() }} />
               )}
@@ -722,6 +728,147 @@ function PhotosSection({ project, onSave }) {
 
 // ── 8. Documents ─────────────────────────────────────────────
 
+// ── 8. Events ────────────────────────────────────────────────
+
+function EventsSection({ project }) {
+  const { organizationId } = useAuth()
+  const [events, setEvents] = useState([])
+  const [loadingEvts, setLoadingEvts] = useState(true)
+  const [adding, setAdding] = useState(false)
+  const [form, setForm] = useState({ event_type: PROJECT_EVENT_TYPES[0], event_date: '', notes: '' })
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (!project?.id) return
+    let cancelled = false
+    supabase.from('project_events')
+      .select('id, event_type, event_date, notes')
+      .eq('lead_id', project.id)
+      .order('event_date', { ascending: true })
+      .then(({ data }) => {
+        if (!cancelled) { setEvents(data || []); setLoadingEvts(false) }
+      })
+    return () => { cancelled = true }
+  }, [project?.id])
+
+  async function handleAdd() {
+    if (!form.event_type || !form.event_date) return
+    setSaving(true)
+    const { data, error } = await supabase.from('project_events').insert({
+      lead_id: project.id,
+      organization_id: organizationId,
+      event_type: form.event_type,
+      event_date: form.event_date + 'T00:00:00',
+      notes: form.notes.trim() || null,
+    }).select().single()
+    if (!error && data) {
+      setEvents(prev => [...prev, data].sort((a, b) => a.event_date.localeCompare(b.event_date)))
+      setAdding(false)
+      setForm({ event_type: PROJECT_EVENT_TYPES[0], event_date: '', notes: '' })
+    }
+    setSaving(false)
+  }
+
+  async function handleDelete(id) {
+    await supabase.from('project_events').delete().eq('id', id)
+    setEvents(prev => prev.filter(e => e.id !== id))
+  }
+
+  return (
+    <Section>
+      <SectionTitle right={
+        !adding && (
+          <button onClick={() => setAdding(true)} style={linkBtn}>+ Add</button>
+        )
+      }>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Calendar size={12} />Events
+        </span>
+      </SectionTitle>
+
+      {!loadingEvts && events.length === 0 && !adding && (
+        <div style={{ background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 10, padding: '14px', textAlign: 'center', color: 'var(--ink-4)', fontSize: 12.5 }}>
+          No events yet
+        </div>
+      )}
+
+      {events.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: adding ? 8 : 0 }}>
+          {events.map(ev => (
+            <div key={ev.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 8, border: '1px solid var(--line)', background: 'var(--bg)' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink-1)' }}>{ev.event_type}</div>
+                <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>
+                  {new Date(ev.event_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  {ev.notes && <span style={{ marginLeft: 6, color: 'var(--ink-4)' }}>· {ev.notes}</span>}
+                </div>
+              </div>
+              <button
+                onClick={() => handleDelete(ev.id)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-4)', padding: 4, display: 'flex', alignItems: 'center' }}
+                title="Delete event"
+              >
+                <Trash2 size={13} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {adding && (
+        <div style={{ background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 10, padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <div>
+              <label style={{ ...fieldLabel }}>Event Type</label>
+              <select
+                value={form.event_type}
+                onChange={e => setForm(f => ({ ...f, event_type: e.target.value }))}
+                style={{ ...inputStyle }}
+              >
+                {PROJECT_EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ ...fieldLabel }}>Date</label>
+              <input
+                type="date"
+                value={form.event_date}
+                onChange={e => setForm(f => ({ ...f, event_date: e.target.value }))}
+                style={{ ...inputStyle }}
+              />
+            </div>
+          </div>
+          <div>
+            <label style={{ ...fieldLabel }}>Notes <span style={{ fontWeight: 400, opacity: 0.7 }}>(optional)</span></label>
+            <input
+              type="text"
+              value={form.notes}
+              onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+              placeholder="e.g. Online auction, 10am start"
+              style={{ ...inputStyle }}
+            />
+          </div>
+          <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+            <button
+              onClick={() => { setAdding(false); setForm({ event_type: PROJECT_EVENT_TYPES[0], event_date: '', notes: '' }) }}
+              style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 7, padding: '6px 14px', fontSize: 12, fontWeight: 600, color: 'var(--ink-2)', cursor: 'pointer', fontFamily: 'inherit' }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleAdd}
+              disabled={saving || !form.event_type || !form.event_date}
+              style={{ ...primaryBtn, padding: '6px 14px', fontSize: 12, opacity: (saving || !form.event_type || !form.event_date) ? 0.5 : 1 }}
+            >
+              {saving ? 'Saving…' : 'Save Event'}
+            </button>
+          </div>
+        </div>
+      )}
+    </Section>
+  )
+}
+
 function DocumentsSection({ project }) {
   // Documents read-only / placeholder until Storage is configured.
   // This section exists so the panel always renders the full 8-section layout.
@@ -745,6 +892,27 @@ export default function ProjectDrawer({ project, onClose, onProjectUpdated, onDe
   const [assignments, setAssignments] = useState([])
   const [showConvert, setShowConvert] = useState(false)
   const [showComplete, setShowComplete] = useState(false)
+  const [clientState, setClientState] = useState(null) // null | 'saving' | 'saved' | 'exists'
+
+  async function handleSaveAsClient() {
+    if (clientState === 'saving' || clientState === 'saved') return
+    setClientState('saving')
+    const { data: existing } = await supabase
+      .from('contacts').select('id')
+      .eq('organization_id', organizationId)
+      .ilike('name', local.name?.trim() || '')
+      .maybeSingle()
+    if (existing) { setClientState('exists'); return }
+    await supabase.from('contacts').insert({
+      name: local.name?.trim(),
+      phone: local.phone || null,
+      email: local.email || null,
+      address: local.address || null,
+      category: 'Client',
+      organization_id: organizationId,
+    })
+    setClientState('saved')
+  }
 
   useEffect(() => { setLocal(project) }, [project])
 
@@ -809,6 +977,8 @@ export default function ProjectDrawer({ project, onClose, onProjectUpdated, onDe
           onEdit={() => onOpenScorer?.(local)}
           onMarkComplete={() => setShowComplete(true)}
           onDelete={onDelete}
+          onSaveAsClient={handleSaveAsClient}
+          clientState={clientState}
         />
 
         {/* Scrollable body — all 8 sections in order, no tabs */}
@@ -819,6 +989,7 @@ export default function ProjectDrawer({ project, onClose, onProjectUpdated, onDe
           <NotesSection project={local} currentUserName={user?.email || 'You'} />
           <ChecklistSection project={local} onSave={saveFields} />
           <PhotosSection project={local} onSave={saveFields} />
+          <EventsSection project={local} />
           <DocumentsSection project={local} />
         </div>
 

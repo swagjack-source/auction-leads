@@ -68,6 +68,10 @@ function meetingsForDay(dayStr, meetings) {
   return meetings.filter(m => m.date === dayStr)
 }
 
+function projectEventsForDay(dayStr, projectEvents) {
+  return projectEvents.filter(e => e.date === dayStr)
+}
+
 // ── Colors ────────────────────────────────────────────────────
 
 const JOB_CHIP = {
@@ -777,7 +781,7 @@ function QuickAddEventModal({ initialDate, leads, members, onClose, onSaved }) {
 
 // ── Month View ────────────────────────────────────────────────
 
-function MonthView({ projects, consults, meetings, viewDate, todayStr, memberMap, onProjectClick, onEventClick, onDayCellClick, showTypes, activeEmployeeCount = 4 }) {
+function MonthView({ projects, consults, meetings, projectEvents = [], viewDate, todayStr, memberMap, onProjectClick, onEventClick, onDayCellClick, showTypes, activeEmployeeCount = 4 }) {
   const year = viewDate.getFullYear()
   const month = viewDate.getMonth()
   const grid = getMonthGrid(year, month)
@@ -887,6 +891,7 @@ function MonthView({ projects, consults, meetings, viewDate, todayStr, memberMap
                 // For today we layer capacity on top with a blend — use a div overlay instead
                 const dayCons = showTypes.consults ? consultsForDay(dayStr, consults) : []
                 const dayMeetings = showTypes.meetings ? meetingsForDay(dayStr, meetings) : []
+                const dayProjEvents = showTypes.events ? projectEventsForDay(dayStr, projectEvents) : []
 
                 return (
                   <div
@@ -985,6 +990,34 @@ function MonthView({ projects, consults, meetings, viewDate, todayStr, memberMap
                         )}
                       </div>
                     )}
+                    {/* Project event chips */}
+                    {dayProjEvents.length > 0 && (
+                      <div style={{ padding: '2px 4px 4px', display: 'flex', flexDirection: 'column', gap: 2, position: 'relative', zIndex: 1 }}>
+                        {dayProjEvents.slice(0, 2).map(ev => (
+                          <div
+                            key={ev.id}
+                            onClick={e => { e.stopPropagation(); onEventClick?.(ev, e.currentTarget.getBoundingClientRect()) }}
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: 4,
+                              background: 'rgba(217,119,6,0.18)', borderRadius: 3,
+                              padding: '2px 5px', fontSize: 10.5, color: '#d97706',
+                              whiteSpace: 'nowrap', overflow: 'hidden', lineHeight: '16px',
+                              opacity: isPast ? 0.4 : 1,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {ev.lead_name ? `${ev.lead_name} — ` : ''}{ev.event_type}
+                            </span>
+                          </div>
+                        ))}
+                        {dayProjEvents.length > 2 && (
+                          <div style={{ fontSize: 10, color: 'var(--ink-3)', padding: '0 5px' }}>
+                            +{dayProjEvents.length - 2} more
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )
               })}
@@ -1053,7 +1086,7 @@ function MonthView({ projects, consults, meetings, viewDate, todayStr, memberMap
 
 const HOURS = Array.from({ length: 14 }, (_, i) => i + 7) // 7 AM – 8 PM
 
-function WeekView({ projects, consults, meetings, viewDate, todayStr, memberMap, onProjectClick, onEventClick, showTypes }) {
+function WeekView({ projects, consults, meetings, projectEvents = [], viewDate, todayStr, memberMap, onProjectClick, onEventClick, showTypes }) {
   const weekStart = getWeekStart(viewDate)
   const weekDays = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(weekStart)
@@ -1097,9 +1130,10 @@ function WeekView({ projects, consults, meetings, viewDate, todayStr, memberMap,
           const dayStr = weekDayStrs[col]
           const isToday = dayStr === todayStr
           const isWeekend = date.getDay() === 0 || date.getDay() === 6
+          const dayProjEvents = showTypes.events ? projectEventsForDay(dayStr, projectEvents) : []
           return (
             <div key={dayStr} style={{
-              padding: '8px 0', textAlign: 'center',
+              padding: '8px 0 4px', textAlign: 'center',
               borderRight: col < 6 ? '1px solid var(--line)' : 'none',
               background: isToday ? 'rgba(59,130,246,0.06)' : 'transparent',
             }}>
@@ -1113,6 +1147,21 @@ function WeekView({ projects, consults, meetings, viewDate, todayStr, memberMap,
               } : { fontSize: 14, fontWeight: 500, color: 'var(--ink-2)', marginTop: 2 }}>
                 {date.getDate()}
               </div>
+              {dayProjEvents.map(ev => (
+                <div
+                  key={ev.id}
+                  onClick={e => { e.stopPropagation(); onEventClick?.(ev, e.currentTarget.getBoundingClientRect()) }}
+                  style={{
+                    margin: '3px 3px 0', padding: '2px 4px', fontSize: 10,
+                    background: 'rgba(217,119,6,0.18)', color: '#d97706',
+                    borderRadius: 3, whiteSpace: 'nowrap', overflow: 'hidden',
+                    textOverflow: 'ellipsis', cursor: 'pointer', lineHeight: '15px',
+                  }}
+                  title={`${ev.lead_name ? ev.lead_name + ' — ' : ''}${ev.event_type}`}
+                >
+                  {ev.lead_name ? `${ev.lead_name} — ` : ''}{ev.event_type}
+                </div>
+              ))}
             </div>
           )
         })}
@@ -1493,7 +1542,7 @@ function ExportModal({ projects, days, onClose }) {
 // ── Calendar sync modal ───────────────────────────────────────
 
 const FEEDS = [
-  { key: 'projects', label: 'Projects', url: 'https://homebase-crm.netlify.app/api/calendar.ics', color: '#A50050', desc: 'All-day blocks for scheduled jobs' },
+  { key: 'projects', label: 'Projects', url: 'https://homebase-crm.netlify.app/api/calendar.ics', color: '#A50050', desc: 'Projects + milestone events' },
   { key: 'consults', label: 'Consults', url: 'https://homebase-crm.netlify.app/api/consults.ics', color: '#7c3aed', desc: 'Timed consult appointments' },
 ]
 
@@ -1569,13 +1618,14 @@ export default function Schedule() {
   const [projects, setProjects] = useState([])
   const [meetingsData, setMeetingsData] = useState([])
   const [calEventsData, setCalEventsData] = useState([])
+  const [projectEventsData, setProjectEventsData] = useState([])
   const [loading, setLoading] = useState(true)
   const [viewDate, setViewDate] = useState(new Date())
   const [activeView, setActiveView] = useState('month')
   const [selectedProject, setSelectedProject] = useState(null)
   const [showExport, setShowExport] = useState(false)
   const [showSync, setShowSync] = useState(false)
-  const [showTypes, setShowTypes] = useState({ projects: true, consults: true, meetings: true })
+  const [showTypes, setShowTypes] = useState({ projects: true, consults: true, meetings: true, events: true })
   const [quickAddDate, setQuickAddDate] = useState(null)
   const [popoverEvent, setPopoverEvent] = useState(null)
   const [popoverRect, setPopoverRect] = useState(null)
@@ -1616,13 +1666,16 @@ export default function Schedule() {
   async function fetchProjects() {
     setLoading(true)
     try {
-      const [leadsRes, meetingsRes, calEventsRes] = await Promise.all([
+      const [leadsRes, meetingsRes, calEventsRes, projEventsRes] = await Promise.all([
         supabase.from('leads')
           .select('id,name,address,job_type,square_footage,density,project_start,project_end,crew_size,status,deal_score,consult_at,assigned_to,what_they_need,lead_source')
           .not('status', 'eq', 'Lost')
           .order('project_start', { ascending: true, nullsFirst: false }),
         supabase.from('meetings').select('*').order('date', { ascending: true }),
         supabase.from('calendar_events').select('*').order('event_date', { ascending: true }),
+        supabase.from('project_events')
+          .select('id, lead_id, event_type, event_date, notes, leads(name)')
+          .order('event_date', { ascending: true }),
       ])
 
       setProjects((leadsRes.data || []).map(p => ({
@@ -1634,6 +1687,17 @@ export default function Schedule() {
       // we silently fall back to calendar_events only.
       setMeetingsData(meetingsRes.error ? [] : (meetingsRes.data || []))
       setCalEventsData(calEventsRes.error ? [] : (calEventsRes.data || []))
+      setProjectEventsData(
+        (projEventsRes.data || []).map(ev => ({
+          id: ev.id,
+          lead_id: ev.lead_id,
+          event_type: ev.event_type,
+          date: ev.event_date ? ev.event_date.slice(0, 10) : null,
+          notes: ev.notes,
+          lead_name: ev.leads?.name || '',
+          type: 'project_event',
+        }))
+      )
     } finally {
       setLoading(false)
     }
@@ -1716,6 +1780,8 @@ export default function Schedule() {
   function handleEventClick(event, rect) {
     if (event.type === 'project') {
       setSelectedProject(event)
+    } else if (event.type === 'project_event') {
+      navigate('/projects?drawer=' + event.lead_id)
     } else {
       setPopoverEvent(event)
       setPopoverRect(rect)
@@ -1727,6 +1793,7 @@ export default function Schedule() {
     { key: 'projects', label: 'Projects', color: '#3b82f6' },
     { key: 'consults', label: 'Consults', color: '#7F77DD' },
     { key: 'meetings', label: 'Meetings', color: '#1D9E75' },
+    { key: 'events',   label: 'Events',   color: '#d97706' },
   ]
 
   return (
@@ -1808,7 +1875,7 @@ export default function Schedule() {
                   onClick={() => setShowTypes(prev => ({ ...prev, [key]: !prev[key] }))}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 6,
-                    background: active ? `rgba(${color === '#3b82f6' ? '59,130,246' : color === '#7F77DD' ? '127,119,221' : '29,158,117'},0.15)` : 'transparent',
+                    background: active ? `rgba(${color === '#3b82f6' ? '59,130,246' : color === '#7F77DD' ? '127,119,221' : color === '#1D9E75' ? '29,158,117' : '217,119,6'},0.15)` : 'transparent',
                     border: `1.5px solid ${active ? color : 'var(--line)'}`,
                     borderRadius: 20,
                     padding: '4px 12px',
@@ -1839,6 +1906,7 @@ export default function Schedule() {
             projects={projects}
             consults={mergedConsults}
             meetings={mergedMeetings}
+            projectEvents={projectEventsData}
             viewDate={viewDate}
             todayStr={todayStr}
             memberMap={memberMap}
@@ -1852,6 +1920,7 @@ export default function Schedule() {
             projects={projects}
             consults={mergedConsults}
             meetings={mergedMeetings}
+            projectEvents={projectEventsData}
             viewDate={viewDate}
             todayStr={todayStr}
             memberMap={memberMap}
@@ -1874,6 +1943,10 @@ export default function Schedule() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
             <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#1D9E75' }} />
             <span style={{ fontSize: 11, color: 'var(--ink-2)' }}>Meeting</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#d97706' }} />
+            <span style={{ fontSize: 11, color: 'var(--ink-2)' }}>Event</span>
           </div>
           <div style={{ width: 1, height: 12, background: 'var(--line)' }} />
           {Object.entries(JOB_CHIP).map(([type, { accent }]) => (

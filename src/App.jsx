@@ -26,6 +26,7 @@ const SavedViews   = lazy(() => import('./pages/SavedViews'))
 const CrewSchedule = lazy(() => import('./pages/CrewSchedule'))
 const TeamSettings = lazy(() => import('./pages/TeamSettings'))
 const Login        = lazy(() => import('./pages/Login'))
+const Join         = lazy(() => import('./pages/Join'))
 import { TeamProvider } from './lib/TeamContext'
 import { ThemeProvider } from './lib/ThemeContext'
 import { AuthProvider } from './lib/AuthContext'
@@ -222,6 +223,7 @@ export default function App() {
               <ErrorBoundary>
                 <Routes>
                   <Route path="/login" element={<Suspense fallback={null}><Login /></Suspense>} />
+                  <Route path="/join"  element={<Suspense fallback={null}><Join /></Suspense>} />
                   <Route element={<AppLayout />}>
                     <Route path="/"          element={<PrivateRoute><Home /></PrivateRoute>} />
                     <Route path="/pipeline"  element={<PrivateRoute><Pipeline /></PrivateRoute>} />

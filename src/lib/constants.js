@@ -51,6 +51,17 @@ export const ROLE_OPTIONS = [
   'Office Admin',
 ]
 
+export const PROJECT_EVENT_TYPES = [
+  'Auction Start',
+  'Auction End',
+  'Clean Out',
+  'Move',
+  'Estate Sale',
+  'Pickup',
+  'Client Meeting',
+  'Other',
+]
+
 export const TRAINING_CATEGORIES = [
   'Onboarding',
   'Safety',

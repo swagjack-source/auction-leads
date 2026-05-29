@@ -192,16 +192,6 @@ function Avatar({ name, color, size = 36 }) {
   )
 }
 
-function timeAgo(dateStr) {
-  if (!dateStr) return null
-  const diff = Date.now() - new Date(dateStr)
-  const days = Math.floor(diff / 86400000)
-  if (days === 0) return 'Today'
-  if (days === 1) return '1d ago'
-  if (days < 7) return `${days}d ago`
-  if (days < 30) return `${Math.floor(days/7)}w ago`
-  return `${Math.floor(days/30)}mo ago`
-}
 
 export default function Contacts() {
   const { organizationId } = useAuth()
@@ -394,7 +384,7 @@ export default function Contacts() {
             ) : (() => {
               const grouped = {}
               listFiltered.forEach(c => {
-                const letter = c.name[0].toUpperCase()
+                const letter = c.name?.[0]?.toUpperCase() || '#'
                 if (!grouped[letter]) grouped[letter] = []
                 grouped[letter].push(c)
               })
@@ -426,7 +416,6 @@ export default function Contacts() {
                         </div>
                         <div style={{ textAlign: 'right', flexShrink: 0 }}>
                           {c.phone && <div style={{ fontSize: 12, color: 'var(--ink-2)' }}>{c.phone}</div>}
-                          <div style={{ fontSize: 10.5, color: 'var(--ink-4)', marginTop: 1 }}>{timeAgo(c.created_at)}</div>
                         </div>
                       </button>
                     )
@@ -446,7 +435,7 @@ export default function Contacts() {
             </div>
           ) : (() => {
             const meta = TYPE_META[selected.type] || { color: '#64748b' }
-            const initials = selected.name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase()
+            const initials = (selected.name || '?').split(' ').map(w => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase() || '?'
             return (
               <div style={{ maxWidth: 440, padding: '24px 28px' }}>
                 {/* Header */}
@@ -518,9 +507,7 @@ export default function Contacts() {
                   {[
                     { label: 'Phone',        value: selected.phone || '—' },
                     { label: 'Email',        value: selected.email || '—', truncate: true },
-                    { label: 'City',         value: selected.company || '—' },
-                    { label: 'Last contact', value: timeAgo(selected.created_at) || '—' },
-                    { label: 'Projects',     value: '—' },
+                    { label: 'Organization', value: selected.company || '—' },
                   ].map(({ label, value, truncate }, i) => (
                     <div key={label} style={{
                       padding: '10px 14px',
@@ -544,20 +531,6 @@ export default function Contacts() {
                   </div>
                 )}
 
-                {/* Recent Activity */}
-                <div>
-                  <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>Recent Activity</div>
-                  {[
-                    { time: '3d ago',      text: 'Called — left voicemail' },
-                    { time: '2 weeks ago', text: 'Referred to Halverson Estate project' },
-                    { time: '1 month ago', text: 'Added to directory' },
-                  ].map((item, i) => (
-                    <div key={i} style={{ display: 'flex', gap: 10, paddingBottom: 10, marginBottom: 8, borderBottom: i < 2 ? '1px solid var(--line-2)' : 'none' }}>
-                      <div style={{ fontSize: 11, color: 'var(--ink-4)', whiteSpace: 'nowrap', minWidth: 70 }}>{item.time}</div>
-                      <div style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>{item.text}</div>
-                    </div>
-                  ))}
-                </div>
               </div>
             )
           })()}

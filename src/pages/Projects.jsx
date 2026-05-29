@@ -1039,7 +1039,18 @@ export default function Projects() {
     const openScorer = searchParams.get('openScorer')
     const tabParam = searchParams.get('tab')
     const leadIdParam = searchParams.get('leadId')
+    const drawerParam = searchParams.get('drawer')
     let consumed = false
+
+    if (drawerParam) {
+      const lead = leads.find(l => String(l.id) === String(drawerParam))
+      if (lead) {
+        setScorerProject(lead)
+        consumed = true
+      } else if (leads.length > 0) {
+        consumed = true
+      }
+    }
 
     if (openScorer === 'true') {
       if (leadIdParam) {
@@ -1067,6 +1078,7 @@ export default function Projects() {
       next.delete('openScorer')
       next.delete('tab')
       next.delete('leadId')
+      next.delete('drawer')
       setSearchParams(next, { replace: true })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

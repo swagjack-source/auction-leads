@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { X, ArrowRight, ExternalLink, Download, CalendarDays, CalendarPlus, Calculator, Send, CheckCircle } from 'lucide-react'
+import { X, ArrowRight, ExternalLink, Download, CalendarDays, CalendarPlus, Calculator, Send, CheckCircle, UserPlus } from 'lucide-react'
 import { estimateCrew, estimateProjectDays } from '../../lib/scoring'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import ScoreBadge from './ScoreBadge'
@@ -273,6 +273,28 @@ export default function LeadModal({ lead, isNew, onClose, onSave }) {
     }
   }
 
+  const [clientState, setClientState] = useState(null) // null | 'saving' | 'saved' | 'exists'
+
+  async function handleSaveAsClient() {
+    if (clientState === 'saving' || clientState === 'saved') return
+    setClientState('saving')
+    const { data: existing } = await supabase
+      .from('contacts').select('id')
+      .eq('organization_id', organizationId)
+      .ilike('name', form.name?.trim() || '')
+      .maybeSingle()
+    if (existing) { setClientState('exists'); return }
+    await supabase.from('contacts').insert({
+      name: form.name?.trim(),
+      phone: form.phone || null,
+      email: form.email || null,
+      address: form.address || null,
+      category: 'Client',
+      organization_id: organizationId,
+    })
+    setClientState('saved')
+  }
+
   const currentStageIdx = PIPELINE_STAGES.indexOf(form.status)
   const nextStage = currentStageIdx < PIPELINE_STAGES.length - 1
     ? PIPELINE_STAGES[currentStageIdx + 1]
@@ -321,6 +343,23 @@ export default function LeadModal({ lead, isNew, onClose, onSave }) {
             </div>
             {score && <ScoreBadge score={score.dealScore} size="lg" />}
           </div>
+          {!isNew && (
+            <button
+              onClick={handleSaveAsClient}
+              title="Save as Client contact"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 5,
+                padding: '5px 10px', borderRadius: 8,
+                border: '1px solid var(--line)', background: 'var(--panel)',
+                cursor: clientState === 'saved' ? 'default' : 'pointer',
+                fontSize: 12, fontWeight: 600,
+                color: clientState === 'saved' ? 'var(--win)' : clientState === 'exists' ? 'var(--ink-3)' : 'var(--ink-2)',
+              }}
+            >
+              <UserPlus size={13} />
+              {clientState === 'saved' ? 'Saved ✓' : clientState === 'exists' ? 'Already saved' : clientState === 'saving' ? '…' : 'Save as Client'}
+            </button>
+          )}
           <button
             onClick={onClose}
             style={{
