@@ -1,7 +1,10 @@
-// Live .ics consult calendar feed
+// Consults calendar feed
 // URL: https://homebase-crm.netlify.app/api/consults.ics
+// Uses SECURITY DEFINER RPC so the anon key can read all org data.
 
 const { createClient } = require('@supabase/supabase-js')
+
+const DOMAIN = 'homebase-crm.netlify.app'
 
 exports.handler = async function () {
   const supabase = createClient(
@@ -9,62 +12,51 @@ exports.handler = async function () {
     process.env.VITE_SUPABASE_ANON_KEY
   )
 
-  const [{ data: leads }, { data: members }] = await Promise.all([
-    supabase
-      .from('leads')
-      .select('id, name, address, assigned_to, consult_at, what_they_need, lead_source, status')
-      .not('consult_at', 'is', null)
-      .not('status', 'eq', 'Lost')
-      .order('consult_at', { ascending: true }),
-    supabase
-      .from('team_members')
-      .select('id, name'),
-  ])
+  const { data, error } = await supabase.rpc('get_calendar_consults')
 
-  const memberMap = {}
-  ;(members || []).forEach(m => { memberMap[m.id] = m.name })
+  if (error) {
+    return { statusCode: 500, body: `get_calendar_consults: ${error.message}` }
+  }
 
-  const events = (leads || []).map(lead => {
-    const start = new Date(lead.consult_at)
-    const end   = new Date(start.getTime() + 60 * 60 * 1000) // 1 hr default
+  const vevents = (data || []).map(lead => {
+    const start   = new Date(lead.consult_at)
+    const end     = new Date(start.getTime() + 60 * 60 * 1000)
 
-    const assigneeName = lead.assigned_to ? memberMap[lead.assigned_to] : null
+    const summary = lead.assignee_name
+      ? `Consult: ${lead.name} (${lead.assignee_name})`
+      : `Consult: ${lead.name}`
 
     const descParts = [
-      assigneeName          && `Assignee: ${assigneeName}`,
-      lead.address          && `Address: ${lead.address}`,
-      lead.lead_source      && `Source: ${lead.lead_source}`,
-      lead.what_they_need   && `Notes: ${lead.what_they_need}`,
-      lead.status           && `Status: ${lead.status}`,
+      lead.assignee_name  && `Assignee: ${lead.assignee_name}`,
+      lead.address        && `Address: ${lead.address}`,
+      lead.lead_source    && `Source: ${lead.lead_source}`,
+      lead.what_they_need && `Notes: ${lead.what_they_need}`,
+      lead.status         && `Status: ${lead.status}`,
     ].filter(Boolean)
-
-    const summary = assigneeName
-      ? `Consult: ${lead.name} (${assigneeName})`
-      : `Consult: ${lead.name}`
 
     const lines = [
       'BEGIN:VEVENT',
-      `UID:consult-${lead.id}@homebase-crm.netlify.app`,
+      `UID:consult-${lead.id}@${DOMAIN}`,
       `DTSTART:${fmtIcal(start)}`,
       `DTEND:${fmtIcal(end)}`,
       `SUMMARY:${esc(summary)}`,
       'CATEGORIES:CONSULT',
     ]
-    if (lead.address) lines.push(`LOCATION:${esc(lead.address)}`)
-    if (descParts.length) lines.push(`DESCRIPTION:${descParts.map(esc).join('\\n')}`)
+    if (lead.address)     lines.push(`LOCATION:${esc(lead.address)}`)
+    if (descParts.length) lines.push(`DESCRIPTION:${esc(descParts.join(' | '))}`)
     lines.push('END:VEVENT')
-    return lines.join('\r\n')
+    return lines.map(fold).join('\r\n')
   })
 
   const cal = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//CT Denver SE//Consults//EN',
+    'PRODID:-//CT Denver SE//Homebase//EN',
     'X-WR-CALNAME:CT Consults',
     'X-WR-TIMEZONE:America/Denver',
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
-    ...events,
+    ...vevents,
     'END:VCALENDAR',
   ].join('\r\n')
 
@@ -72,7 +64,6 @@ exports.handler = async function () {
     statusCode: 200,
     headers: {
       'Content-Type': 'text/calendar; charset=utf-8',
-      // Allow calendar apps to cache for 1 hour — reduces unnecessary DB hits.
       'Cache-Control': 'public, max-age=3600, stale-while-revalidate=600',
       'Access-Control-Allow-Origin': '*',
     },
@@ -90,4 +81,15 @@ function esc(str) {
     .replace(/;/g, '\\;')
     .replace(/,/g, '\\,')
     .replace(/\n/g, '\\n')
+}
+
+function fold(line) {
+  if (line.length <= 75) return line
+  const out = [line.slice(0, 75)]
+  let i = 75
+  while (i < line.length) {
+    out.push(' ' + line.slice(i, i + 74))
+    i += 74
+  }
+  return out.join('\r\n')
 }
