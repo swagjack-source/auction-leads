@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
+import { HIDDEN_ROUTES } from '../lib/featureFlags'
 import {
   ArrowRight, Gavel, Phone, Users,
   PlusCircle, Columns, Calculator, Briefcase, CalendarPlus,
@@ -489,7 +490,7 @@ function QuickActions({ navigate }) {
       label: 'Schedule',
       items: [
         { Icon: CalendarPlus, label: 'Add Consult',  onClick: () => navigate('/calendar?action=addEvent') },
-        { Icon: Users,        label: 'Crew Schedule', onClick: () => navigate('/schedule') },
+        ...(!HIDDEN_ROUTES.has('/schedule') ? [{ Icon: Users, label: 'Crew Schedule', onClick: () => navigate('/schedule') }] : []),
       ],
     },
   ]

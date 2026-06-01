@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { HIDDEN_ROUTES } from '../lib/featureFlags'
 import {
   Plus, Copy, Check, Trash2, X, Shield, User, Users,
   ChevronDown, Mail, Phone, DollarSign, Briefcase, AlertTriangle,
@@ -973,13 +974,17 @@ export default function TeamSettings() {
               background:'rgba(59,130,246,0.06)',border:'1px solid rgba(59,130,246,0.15)',
               borderRadius:9,fontSize:12,color:'var(--ink-3)',lineHeight:1.5 }}>
               <strong style={{ color:'var(--ink-2)' }}>Employees</strong> are field crew assigned to jobs on the{' '}
-              <button
-                onClick={() => navigate('/schedule')}
-                style={{ background:'none',border:'none',cursor:'pointer',color:'var(--accent)',
-                  fontWeight:600,fontSize:12,padding:0,fontFamily:'inherit',textDecoration:'underline' }}
-              >
-                Crew Schedule
-              </button>. They don't need a login — just add their name, role, and hourly rate.
+              {HIDDEN_ROUTES.has('/schedule') ? (
+                <strong style={{ color: 'var(--ink-2)' }}>Crew Schedule</strong>
+              ) : (
+                <button
+                  onClick={() => navigate('/schedule')}
+                  style={{ background:'none',border:'none',cursor:'pointer',color:'var(--accent)',
+                    fontWeight:600,fontSize:12,padding:0,fontFamily:'inherit',textDecoration:'underline' }}
+                >
+                  Crew Schedule
+                </button>
+              )}. They don't need a login — just add their name, role, and hourly rate.
             </div>
 
             {activeEmployees.length === 0 ? (

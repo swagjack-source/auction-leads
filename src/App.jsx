@@ -4,6 +4,7 @@ import { Menu, Bell, Moon, Sun, HelpCircle, Monitor, Home as HomeIcon, Columns3,
 import Tour from './components/Tour'
 import { useTheme } from './lib/ThemeContext'
 import ErrorBoundary from './components/ErrorBoundary'
+import { HIDDEN_ROUTES } from './lib/featureFlags'
 import PrivateRoute from './components/PrivateRoute'
 import Sidebar from './components/Layout/Sidebar'
 
@@ -312,16 +313,16 @@ export default function App() {
                     <Route path="/bdr"       element={<PrivateRoute><BDR /></PrivateRoute>} />
                     <Route path="/contacts"  element={<PrivateRoute><Contacts /></PrivateRoute>} />
                     <Route path="/projects"  element={<PrivateRoute><Projects /></PrivateRoute>} />
-                    <Route path="/training"  element={<PrivateRoute><Training /></PrivateRoute>} />
-                    <Route path="/library"   element={<PrivateRoute><Library /></PrivateRoute>} />
-                    <Route path="/activity"  element={<PrivateRoute><Activity /></PrivateRoute>} />
-                    {/* /templates is now a tab inside /library */}
-                    <Route path="/templates" element={<Navigate to="/library?tab=templates" replace />} />
-                    <Route path="/expenses"  element={<PrivateRoute><Expenses /></PrivateRoute>} />
-                    <Route path="/inventory" element={<PrivateRoute><Inventory /></PrivateRoute>} />
+                    {/* Hidden routes — redirect to / until feature is ready */}
+                    <Route path="/training"  element={HIDDEN_ROUTES.has('/training')  ? <Navigate to="/" replace /> : <PrivateRoute><Training /></PrivateRoute>} />
+                    <Route path="/library"   element={HIDDEN_ROUTES.has('/library')   ? <Navigate to="/" replace /> : <PrivateRoute><Library /></PrivateRoute>} />
+                    <Route path="/activity"  element={HIDDEN_ROUTES.has('/activity')  ? <Navigate to="/" replace /> : <PrivateRoute><Activity /></PrivateRoute>} />
+                    <Route path="/templates" element={HIDDEN_ROUTES.has('/templates') ? <Navigate to="/" replace /> : <Navigate to="/library?tab=templates" replace />} />
+                    <Route path="/expenses"  element={HIDDEN_ROUTES.has('/expenses')  ? <Navigate to="/" replace /> : <PrivateRoute><Expenses /></PrivateRoute>} />
+                    <Route path="/inventory" element={HIDDEN_ROUTES.has('/inventory') ? <Navigate to="/" replace /> : <PrivateRoute><Inventory /></PrivateRoute>} />
+                    <Route path="/saved"     element={HIDDEN_ROUTES.has('/saved')     ? <Navigate to="/" replace /> : <PrivateRoute><SavedViews /></PrivateRoute>} />
+                    <Route path="/schedule"  element={HIDDEN_ROUTES.has('/schedule')  ? <Navigate to="/" replace /> : <PrivateRoute><CrewSchedule /></PrivateRoute>} />
                     <Route path="/ctbids"    element={<PrivateRoute><CTBids /></PrivateRoute>} />
-                    <Route path="/saved"     element={<PrivateRoute><SavedViews /></PrivateRoute>} />
-                    <Route path="/schedule" element={<PrivateRoute><CrewSchedule /></PrivateRoute>} />
                     <Route path="/team"     element={<PrivateRoute><TeamSettings /></PrivateRoute>} />
                     <Route path="/partners" element={<PrivateRoute><Partners /></PrivateRoute>} />
                   </Route>

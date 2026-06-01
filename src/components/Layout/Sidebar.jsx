@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { NavLink } from 'react-router-dom'
 import { Home, Columns3, FolderOpen, CalendarDays, BookUser, Users, BookOpen, Image, X, Search, FileText, LogOut, Gavel, Package, ReceiptText, Bookmark, Bell, Handshake, ClipboardList, ShieldCheck, Star } from 'lucide-react'
+import { HIDDEN_ROUTES } from '../../lib/featureFlags'
 import { supabase } from '../../lib/supabase'
 import { useTheme } from '../../lib/ThemeContext'
 import { useAuth } from '../../lib/AuthContext'
@@ -108,6 +109,9 @@ export default function Sidebar({ mobile, onClose }) {
     { to: '/saved',     icon: Bookmark,    label: 'Saved Views'},
   ]
 
+  const visibleMain   = mainNav.filter(item => !HIDDEN_ROUTES.has(item.to))
+  const visibleQuick  = quickLinks.filter(item => !HIDDEN_ROUTES.has(item.to))
+
   return (
     <aside style={{
       width: 232,
@@ -172,17 +176,21 @@ export default function Sidebar({ mobile, onClose }) {
       <nav style={{ flex: 1, overflowY: 'auto', marginTop: 2 }}>
         <SectionLabel>Workspace</SectionLabel>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-          {mainNav.map(item => (
+          {visibleMain.map(item => (
             <NavItem key={item.to} {...item} mobile={mobile} onClose={onClose} />
           ))}
         </div>
 
-        <SectionLabel>Quick links</SectionLabel>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-          {quickLinks.map(item => (
-            <NavItem key={item.to} {...item} mobile={mobile} onClose={onClose} />
-          ))}
-        </div>
+        {visibleQuick.length > 0 && (
+          <>
+            <SectionLabel>Quick links</SectionLabel>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              {visibleQuick.map(item => (
+                <NavItem key={item.to} {...item} mobile={mobile} onClose={onClose} />
+              ))}
+            </div>
+          </>
+        )}
       </nav>
 
       {/* User footer */}
