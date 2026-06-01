@@ -5,13 +5,20 @@ import { useTeam } from '../../lib/TeamContext'
 // ── Job type badge config ──────────────────────────────────────────────────
 
 const JOB_TYPE_COLORS = {
-  'Clean Out':          { text: '#4B80C1', bg: 'color-mix(in oklab, #4B80C1 14%, var(--panel))' },
-  'Auction':            { text: '#7A5CA5', bg: 'color-mix(in oklab, #7A5CA5 14%, var(--panel))' },
-  'Both':               { text: '#3E5C86', bg: 'color-mix(in oklab, #3E5C86 14%, var(--panel))' },
-  'Move':               { text: '#3A9E8A', bg: 'color-mix(in oklab, #3A9E8A 14%, var(--panel))' },
+  'Clean Out':             { text: '#4B80C1', bg: 'color-mix(in oklab, #4B80C1 14%, var(--panel))' },
+  'Auction':               { text: '#7A5CA5', bg: 'color-mix(in oklab, #7A5CA5 14%, var(--panel))' },
+  'Move':                  { text: '#3A9E8A', bg: 'color-mix(in oklab, #3A9E8A 14%, var(--panel))' },
+  'In-person Estate Sale': { text: '#B07A2A', bg: 'color-mix(in oklab, #B07A2A 14%, var(--panel))' },
 }
 
 const FALLBACK_JOB_COLOR = { text: '#6B7280', bg: 'color-mix(in oklab, #6B7280 12%, var(--panel))' }
+
+// 'Both' is legacy for Clean Out + Auction. Expand to separate pills.
+function expandTypes(jobType) {
+  if (!jobType || jobType === 'Unknown') return []
+  if (jobType === 'Both') return ['Clean Out', 'Auction']
+  return [jobType]
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -88,7 +95,7 @@ const LeadCard = memo(function LeadCard({
   const score = lead.deal_score ?? lead.item_quality_score ?? null
   const showScoreRow = score != null || bid != null
 
-  const jobColors = JOB_TYPE_COLORS[lead.job_type] || (lead.job_type ? FALLBACK_JOB_COLOR : null)
+  const jobTypes = expandTypes(lead.job_type)
 
   // Status badge
   const wonLostBacklog = ['Won', 'Lost', 'Backlog']
@@ -162,10 +169,11 @@ const LeadCard = memo(function LeadCard({
     >
       {/* Row 1: Badges */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4, minHeight: 20 }}>
-        <div>
-          {jobColors && lead.job_type && (
-            <Pill text={lead.job_type} textColor={jobColors.text} bgColor={jobColors.bg} />
-          )}
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+          {jobTypes.map(t => {
+            const c = JOB_TYPE_COLORS[t] || FALLBACK_JOB_COLOR
+            return <Pill key={t} text={t} textColor={c.text} bgColor={c.bg} />
+          })}
         </div>
         <div>{statusBadge}</div>
       </div>

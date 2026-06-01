@@ -57,7 +57,7 @@ exports.handler = async function () {
     const lname   = lastName(ev.lead_name)
     const summary = `${lname} — ${ev.event_type}`
     const start   = isoToYMD(ev.event_date)
-    const end     = nextDay(start)
+    const end     = ev.end_date ? nextDay(isoToYMD(ev.end_date)) : nextDay(start)
 
     const lines = [
       'BEGIN:VEVENT',

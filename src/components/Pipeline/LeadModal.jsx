@@ -151,6 +151,13 @@ const selectStyle = {
   cursor: 'pointer',
 }
 
+// Derives the legacy job_type string from a multi-type selection
+function deriveJobType(types) {
+  if (!types || types.length === 0) return null
+  if (types.includes('Clean Out') && types.includes('Auction')) return 'Both'
+  return types[0]
+}
+
 export default function LeadModal({ lead, isNew, onClose, onSave }) {
   const { organizationId } = useAuth()
   const [form, setForm] = useState({ ...lead })
@@ -160,6 +167,8 @@ export default function LeadModal({ lead, isNew, onClose, onSave }) {
   const [saveError, setSaveError] = useState(null)
   const [actionMsg, setActionMsg] = useState(null)
   const [estimate, setEstimate] = useState(null)
+  const [availableTypes, setAvailableTypes] = useState([])
+  const [selectedTypes, setSelectedTypes] = useState([])
   const consultRef = useRef(null)
   const { members } = useTeam()
   const isMobile = useIsMobile()
@@ -168,6 +177,47 @@ export default function LeadModal({ lead, isNew, onClose, onSave }) {
   useEffect(() => {
     if (!isNew && lead.id) fetchEstimate()
   }, [lead.id])
+
+  // Load available project types and this lead's current selections
+  useEffect(() => {
+    supabase.from('project_types').select('id, name').order('name').then(({ data }) => {
+      setAvailableTypes(data || [])
+    })
+    if (lead.id) {
+      supabase
+        .from('project_project_types')
+        .select('project_types(name)')
+        .eq('project_id', lead.id)
+        .then(({ data }) => {
+          if (data && data.length > 0) {
+            setSelectedTypes(data.map(r => r.project_types.name))
+          } else {
+            // Fall back to deriving from job_type
+            const jt = lead.job_type
+            if (jt === 'Both') setSelectedTypes(['Clean Out', 'Auction'])
+            else if (jt && jt !== 'Unknown') setSelectedTypes([jt])
+          }
+        })
+    }
+  }, [lead.id])
+
+  function toggleType(name) {
+    setSelectedTypes(prev => prev.includes(name) ? prev.filter(t => t !== name) : [...prev, name])
+  }
+
+  async function syncJunctionTypes(leadId) {
+    if (!leadId) return
+    // Delete existing rows for this lead, then re-insert selected ones
+    await supabase.from('project_project_types').delete().eq('project_id', leadId)
+    if (selectedTypes.length === 0) return
+    const { data: typeRows } = await supabase
+      .from('project_types').select('id, name').in('name', selectedTypes)
+    if (typeRows && typeRows.length > 0) {
+      await supabase.from('project_project_types').insert(
+        typeRows.map(t => ({ project_id: leadId, project_type_id: t.id }))
+      )
+    }
+  }
 
   async function fetchEstimate() {
     const { data } = await supabase
@@ -235,19 +285,20 @@ export default function LeadModal({ lead, isNew, onClose, onSave }) {
   const toInputDT = v => v ? new Date(v).toLocaleString('sv').slice(0, 16).replace(' ', 'T') : ''
 
   useEffect(() => {
-    if (form.square_footage && form.density && form.item_quality_score && form.job_type) {
+    const jobType = deriveJobType(selectedTypes) || form.job_type
+    if (form.square_footage && form.density && form.item_quality_score && jobType) {
       const result = calculateDeal({
         sqft: Number(form.square_footage),
         density: form.density,
         itemQuality: Number(form.item_quality_score),
-        jobType: form.job_type,
+        jobType,
         zipCode: form.zip_code,
       })
       setScore(result)
     } else {
       setScore(null)
     }
-  }, [form.square_footage, form.density, form.item_quality_score, form.job_type, form.zip_code])
+  }, [form.square_footage, form.density, form.item_quality_score, form.job_type, form.zip_code, selectedTypes])
 
   function handleChange(key, value) {
     setForm(f => ({ ...f, [key]: value }))
@@ -266,7 +317,13 @@ export default function LeadModal({ lead, isNew, onClose, onSave }) {
     if (!form.name?.trim() || !form.assigned_to || !form.lead_source) return
     setSaving(true)
     try {
-      await onSave({ ...form, deal_score: score?.dealScore ?? null })
+      const derivedJobType = deriveJobType(selectedTypes)
+      await onSave({
+        ...form,
+        job_type: derivedJobType ?? form.job_type,
+        deal_score: score?.dealScore ?? null,
+      })
+      if (form.id) await syncJunctionTypes(form.id)
     } catch (err) {
       setSaveError(err.message || 'Save failed. Please try again.')
       setSaving(false)
@@ -436,10 +493,37 @@ export default function LeadModal({ lead, isNew, onClose, onSave }) {
                   placeholder="1–10"
                 />
               </Field>
-              <Field label="Job Type">
-                <select value={form.job_type || 'Both'} onChange={e => handleChange('job_type', e.target.value)} style={selectStyle}>
-                  {JOB_TYPES.map(t => <option key={t}>{t}</option>)}
-                </select>
+              <Field label="Project Types">
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                  {availableTypes.map(t => {
+                    const sel = selectedTypes.includes(t.name)
+                    return (
+                      <label
+                        key={t.id}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 5,
+                          padding: '4px 10px', borderRadius: 7, cursor: 'pointer',
+                          border: `1px solid ${sel ? 'var(--accent)' : 'var(--line)'}`,
+                          background: sel ? 'var(--accent-soft)' : 'var(--panel)',
+                          color: sel ? 'var(--accent-ink)' : 'var(--ink-2)',
+                          fontSize: 12.5, fontWeight: 500,
+                          transition: 'all 120ms', userSelect: 'none',
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={sel}
+                          onChange={() => toggleType(t.name)}
+                          style={{ display: 'none' }}
+                        />
+                        {t.name}
+                      </label>
+                    )
+                  })}
+                  {availableTypes.length === 0 && (
+                    <span style={{ fontSize: 12, color: 'var(--ink-4)' }}>Loading…</span>
+                  )}
+                </div>
               </Field>
             </div>
 

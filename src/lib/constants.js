@@ -25,6 +25,7 @@ export const CONTACT_TYPES = [
   'Business Connection',
   'Client',
   'Lead',
+  'Realtor',
 ]
 
 export const BID_TAGS = [
@@ -52,12 +53,16 @@ export const ROLE_OPTIONS = [
 ]
 
 export const PROJECT_EVENT_TYPES = [
-  'Auction Start',
-  'Auction End',
+  'Sort & Organize',
+  'Lotting',
+  'Photo Day',
+  'Auction Post',
+  'Auction Run',
+  'Pickup Prep',
+  'Auction Pickup',
   'Clean Out',
   'Move',
   'Estate Sale',
-  'Pickup',
   'Client Meeting',
   'Other',
 ]

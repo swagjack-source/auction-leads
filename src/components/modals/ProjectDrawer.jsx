@@ -735,14 +735,14 @@ function EventsSection({ project }) {
   const [events, setEvents] = useState([])
   const [loadingEvts, setLoadingEvts] = useState(true)
   const [adding, setAdding] = useState(false)
-  const [form, setForm] = useState({ event_type: PROJECT_EVENT_TYPES[0], event_date: '', notes: '' })
+  const [form, setForm] = useState({ event_type: PROJECT_EVENT_TYPES[0], event_date: '', end_date: '', notes: '' })
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (!project?.id) return
     let cancelled = false
     supabase.from('project_events')
-      .select('id, event_type, event_date, notes')
+      .select('id, event_type, event_date, end_date, notes')
       .eq('lead_id', project.id)
       .order('event_date', { ascending: true })
       .then(({ data }) => {
@@ -759,12 +759,13 @@ function EventsSection({ project }) {
       organization_id: organizationId,
       event_type: form.event_type,
       event_date: form.event_date + 'T00:00:00',
+      end_date: form.end_date ? form.end_date + 'T00:00:00' : null,
       notes: form.notes.trim() || null,
     }).select().single()
     if (!error && data) {
       setEvents(prev => [...prev, data].sort((a, b) => a.event_date.localeCompare(b.event_date)))
       setAdding(false)
-      setForm({ event_type: PROJECT_EVENT_TYPES[0], event_date: '', notes: '' })
+      setForm({ event_type: PROJECT_EVENT_TYPES[0], event_date: '', end_date: '', notes: '' })
     }
     setSaving(false)
   }
@@ -800,6 +801,9 @@ function EventsSection({ project }) {
                 <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink-1)' }}>{ev.event_type}</div>
                 <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>
                   {new Date(ev.event_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  {ev.end_date && (
+                    <span> – {new Date(ev.end_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                  )}
                   {ev.notes && <span style={{ marginLeft: 6, color: 'var(--ink-4)' }}>· {ev.notes}</span>}
                 </div>
               </div>
@@ -817,23 +821,32 @@ function EventsSection({ project }) {
 
       {adding && (
         <div style={{ background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 10, padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div>
+            <label style={{ ...fieldLabel }}>Event Type</label>
+            <select
+              value={form.event_type}
+              onChange={e => setForm(f => ({ ...f, event_type: e.target.value }))}
+              style={{ ...inputStyle }}
+            >
+              {PROJECT_EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             <div>
-              <label style={{ ...fieldLabel }}>Event Type</label>
-              <select
-                value={form.event_type}
-                onChange={e => setForm(f => ({ ...f, event_type: e.target.value }))}
-                style={{ ...inputStyle }}
-              >
-                {PROJECT_EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={{ ...fieldLabel }}>Date</label>
+              <label style={{ ...fieldLabel }}>Start Date</label>
               <input
                 type="date"
                 value={form.event_date}
                 onChange={e => setForm(f => ({ ...f, event_date: e.target.value }))}
+                style={{ ...inputStyle }}
+              />
+            </div>
+            <div>
+              <label style={{ ...fieldLabel }}>End Date <span style={{ fontWeight: 400, opacity: 0.7 }}>(optional)</span></label>
+              <input
+                type="date"
+                value={form.end_date}
+                onChange={e => setForm(f => ({ ...f, end_date: e.target.value }))}
                 style={{ ...inputStyle }}
               />
             </div>
@@ -850,7 +863,7 @@ function EventsSection({ project }) {
           </div>
           <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
             <button
-              onClick={() => { setAdding(false); setForm({ event_type: PROJECT_EVENT_TYPES[0], event_date: '', notes: '' }) }}
+              onClick={() => { setAdding(false); setForm({ event_type: PROJECT_EVENT_TYPES[0], event_date: '', end_date: '', notes: '' }) }}
               style={{ background: 'var(--bg-2)', border: '1px solid var(--line-2)', borderRadius: 7, padding: '6px 14px', fontSize: 12, fontWeight: 600, color: 'var(--ink-2)', cursor: 'pointer', fontFamily: 'inherit' }}
             >
               Cancel

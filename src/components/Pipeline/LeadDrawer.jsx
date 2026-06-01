@@ -3,6 +3,7 @@ import { X, MapPin, Phone, Clock, CheckSquare, Square, ChevronDown, Calendar, Fi
 import { useNavigate } from 'react-router-dom'
 import { getScoreColor, getScoreLabel } from '../../lib/scoring'
 import { supabase } from '../../lib/supabase'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import { PIPELINE_STAGES } from '../../lib/constants'
 import { useTeam } from '../../lib/TeamContext'
 import SendEstimateModal from './SendEstimateModal'
@@ -65,6 +66,7 @@ function SectionTitle({ children }) {
 
 export default function LeadDrawer({ lead, onClose, onEdit, onMoveStatus, onChecklistChange, onDelete }) {
   const navigate = useNavigate()
+  const isMobile = useIsMobile()
   const { members } = useTeam()
   const [checklist, setChecklist] = useState(() => {
     if (Array.isArray(lead?.checklist) && lead.checklist.length > 0) return lead.checklist
@@ -303,8 +305,19 @@ export default function LeadDrawer({ lead, onClose, onEdit, onMoveStatus, onChec
         }}
       />
 
-      {/* Drawer panel */}
-      <aside style={{
+      {/* Drawer panel — right-side on desktop, bottom sheet on mobile */}
+      <aside style={isMobile ? {
+        position: 'fixed', left: 0, right: 0, bottom: 0,
+        height: '92dvh',
+        background: 'var(--panel)',
+        borderTop: '1px solid var(--line)',
+        borderRadius: '16px 16px 0 0',
+        boxShadow: '0 -8px 40px rgba(20,22,26,0.18)',
+        zIndex: 100,
+        display: 'flex', flexDirection: 'column',
+        animation: 'slideup 240ms cubic-bezier(.2,.7,.3,1.05)',
+        overflow: 'hidden',
+      } : {
         position: 'fixed', top: 0, right: 0, bottom: 0,
         width: 460,
         background: 'var(--panel)',
@@ -516,7 +529,7 @@ export default function LeadDrawer({ lead, onClose, onEdit, onMoveStatus, onChec
           {/* Contact section */}
           <div style={{ marginBottom: 20 }}>
             <SectionTitle>Contact</SectionTitle>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 16px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '6px 16px' }}>
               {[
                 { label: 'Phone',     value: lead.phone },
                 { label: 'Source',    value: lead.lead_source },
@@ -574,7 +587,7 @@ export default function LeadDrawer({ lead, onClose, onEdit, onMoveStatus, onChec
           {(lead.square_footage || lead.density || lead.item_quality_score) && (
             <div style={{ marginBottom: 20 }}>
               <SectionTitle>Deal Details</SectionTitle>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 8 }}>
                 {lead.square_footage && (
                   <div style={{ background: 'var(--bg)', borderRadius: 8, padding: '8px 10px' }}>
                     <div style={{ fontSize: 10.5, color: 'var(--ink-4)' }}>Square Footage</div>

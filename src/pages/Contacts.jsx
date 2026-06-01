@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { Plus, Search, Trash2, X, Phone, Mail, MapPin, Building2, Pencil, Star, Upload, Download, ChevronRight, ExternalLink } from 'lucide-react'
+import { Plus, Search, Trash2, X, Phone, Mail, MapPin, Building2, Pencil, Star, Upload, Download, ChevronRight, ExternalLink, ChevronLeft } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { CONTACT_TYPES } from '../lib/constants'
 import { useAuth } from '../lib/AuthContext'
 import { validateRequired, validateEmail, validatePhone, formatPhone, firstError } from '../lib/validate'
 import { useSupabaseQuery } from '../lib/useSupabaseQuery'
+import { useIsMobile } from '../hooks/useIsMobile'
 
 const TYPE_META = {
   'Partner':       { color: '#3b82f6', dot: '#3b82f6' },
@@ -37,6 +38,7 @@ const EMPTY = { name: '', company: '', type: 'Partner', phone: '', email: '', ad
 
 function ContactModal({ contact, onClose, onSave, onSaveAnother }) {
   const isNew = !contact.id
+  const isMobile = useIsMobile()
   const [form, setForm] = useState({ ...EMPTY, ...contact })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
@@ -83,41 +85,39 @@ function ContactModal({ contact, onClose, onSave, onSaveAnother }) {
 
   return (
     <div
-      style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'var(--overlay)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, animation: 'fadein 150ms' }}
+      style={isMobile
+        ? { position: 'fixed', inset: 0, zIndex: 300, background: 'var(--overlay)', display: 'flex', flexDirection: 'column', animation: 'fadein 150ms' }
+        : { position: 'fixed', inset: 0, zIndex: 300, background: 'var(--overlay)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, animation: 'fadein 150ms' }
+      }
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 18, boxShadow: 'var(--shadow-lg)', width: '100%', maxWidth: 560, animation: 'popin 180ms cubic-bezier(.2,.7,.3,1.05)', overflow: 'hidden' }}>
+      <div style={isMobile
+        ? { background: 'var(--panel)', display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }
+        : { background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 18, boxShadow: 'var(--shadow-lg)', width: '100%', maxWidth: 560, animation: 'popin 180ms cubic-bezier(.2,.7,.3,1.05)', overflow: 'hidden' }
+      }>
 
         {/* Header */}
-        <div style={{ padding: '18px 22px 14px', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ width: 32, height: 32, borderRadius: 10, background: 'var(--accent-soft)', color: 'var(--accent)', display: 'grid', placeItems: 'center', flexShrink: 0, fontSize: 16 }}>👤</div>
+        <div style={{ padding: '16px 20px 12px', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink-1)' }}>{isNew ? 'New Contact' : 'Edit Contact'}</div>
-            <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>Add a partner, vendor, or referral source to your directory</div>
           </div>
-          <button onClick={onClose} style={{ width: 28, height: 28, borderRadius: 8, border: '1px solid var(--line)', background: 'transparent', cursor: 'pointer', display: 'grid', placeItems: 'center', color: 'var(--ink-3)' }}><X size={14} /></button>
+          <button onClick={onClose} style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid var(--line)', background: 'transparent', cursor: 'pointer', display: 'grid', placeItems: 'center', color: 'var(--ink-3)' }}><X size={16} /></button>
         </div>
 
-        {/* Form body with preview */}
-        <div style={{ display: 'flex', gap: 0 }}>
-          {/* Avatar preview — fixed width so name input doesn't reflow the layout */}
-          <div style={{ padding: '20px 14px', borderRight: '1px solid var(--line-2)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, width: 132, flexShrink: 0, boxSizing: 'border-box' }}>
-            <div style={{
-              width: 64, height: 64, borderRadius: '50%',
-              background: `${meta.color}20`, border: `2px solid ${meta.color}40`,
-              color: meta.color, fontSize: 22, fontWeight: 700,
-              display: 'grid', placeItems: 'center',
-              flexShrink: 0,
-            }}>{initials}</div>
-            <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--ink-2)', textAlign: 'center', lineHeight: 1.3, width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {form.name || 'Contact name'}
+        {/* Form body */}
+        <div style={{ display: 'flex', gap: 0, flex: 1, overflow: 'hidden' }}>
+          {/* Avatar preview — desktop only */}
+          {!isMobile && (
+            <div style={{ padding: '20px 14px', borderRight: '1px solid var(--line-2)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, width: 132, flexShrink: 0, boxSizing: 'border-box' }}>
+              <div style={{ width: 64, height: 64, borderRadius: '50%', background: `${meta.color}20`, border: `2px solid ${meta.color}40`, color: meta.color, fontSize: 22, fontWeight: 700, display: 'grid', placeItems: 'center', flexShrink: 0 }}>{initials}</div>
+              <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--ink-2)', textAlign: 'center', lineHeight: 1.3, width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{form.name || 'Contact name'}</div>
+              <div style={{ fontSize: 11, color: 'var(--ink-4)', textAlign: 'center', width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{form.company || 'Role'}</div>
             </div>
-            <div style={{ fontSize: 11, color: 'var(--ink-4)', textAlign: 'center', width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{form.company || 'Role'}</div>
-          </div>
+          )}
 
           {/* Fields */}
-          <div style={{ flex: 1, padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto', maxHeight: '60vh' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div style={{ flex: 1, padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto', maxHeight: isMobile ? 'none' : '60vh' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
               <div>
                 <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-3)', display: 'block', marginBottom: 5 }}>Full name <span style={{ color: 'var(--lose)' }}>*</span></label>
                 <input value={form.name} onChange={e => set('name', e.target.value)}
@@ -133,7 +133,7 @@ function ContactModal({ contact, onClose, onSave, onSaveAnother }) {
                 </select>
               </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
               <div>
                 <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-3)', display: 'block', marginBottom: 5 }}>Address</label>
                 <input value={form.address} onChange={e => set('address', e.target.value)} placeholder="123 Main St, City, State" style={inputStyle} />
@@ -143,7 +143,7 @@ function ContactModal({ contact, onClose, onSave, onSaveAnother }) {
                 <input value={form.company} onChange={e => set('company', e.target.value)} placeholder="Company or firm name" style={inputStyle} />
               </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
               <div>
                 <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-3)', display: 'block', marginBottom: 5 }}>Phone</label>
                 <input value={form.phone}
@@ -195,11 +195,13 @@ function Avatar({ name, color, size = 36 }) {
 
 export default function Contacts() {
   const { organizationId } = useAuth()
+  const isMobile = useIsMobile()
   const [search, setSearch]             = useState('')
   const [activeType, setActiveType]     = useState('All')
   const [selected, setSelected]         = useState(null)
   const [modalContact, setModalContact] = useState(null)
   const [showStarred, setShowStarred]   = useState(false)
+  const [mobileView, setMobileView]     = useState('list') // 'list' | 'detail'
 
   const { data: contacts = [], loading, error, refetch: refetchContacts } = useSupabaseQuery(async () => {
     const { data, error } = await supabase.from('contacts').select('*').order('name')
@@ -249,6 +251,138 @@ export default function Contacts() {
     return true
   })
 
+  // ── Mobile render ───────────────────────────────────────────────────────────
+  if (isMobile) {
+    // Detail screen
+    if (mobileView === 'detail' && selected) {
+      const meta = TYPE_META[selected.type] || { color: '#64748b' }
+      const initials = (selected.name || '?').split(' ').map(w => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase() || '?'
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: 'var(--panel)' }}>
+          {/* Back bar */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 12px', height: 48, borderBottom: '1px solid var(--line)', background: 'var(--panel)', flexShrink: 0 }}>
+            <button
+              onClick={() => setMobileView('list')}
+              style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', fontSize: 14, fontWeight: 600, padding: '8px 4px', minHeight: 44, fontFamily: 'inherit' }}
+            >
+              <ChevronLeft size={18} strokeWidth={2} /> Contacts
+            </button>
+            <div style={{ flex: 1 }} />
+            <button
+              onClick={() => setModalContact(selected)}
+              style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', fontSize: 14, fontWeight: 600, padding: '8px 4px', minHeight: 44, fontFamily: 'inherit' }}
+            >
+              <Pencil size={15} strokeWidth={1.8} /> Edit
+            </button>
+          </div>
+          {/* Detail content */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '20px 20px 32px' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 20 }}>
+              <div style={{ width: 52, height: 52, borderRadius: '50%', flexShrink: 0, background: `${meta.color}22`, border: `2px solid ${meta.color}40`, color: meta.color, fontSize: 18, fontWeight: 700, display: 'grid', placeItems: 'center' }}>{initials}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--ink-1)', letterSpacing: '-0.02em', lineHeight: 1.2 }}>{selected.name}</div>
+                {selected.address && <div style={{ fontSize: 12.5, color: 'var(--ink-3)', marginTop: 2 }}>{selected.address}</div>}
+                {selected.company && <div style={{ fontSize: 12.5, color: 'var(--ink-3)', marginTop: 1 }}>{selected.company}</div>}
+                {selected.type && <span style={{ display: 'inline-block', marginTop: 8, fontSize: 11, fontWeight: 700, background: `${meta.color}18`, color: meta.color, border: `1px solid ${meta.color}30`, padding: '3px 10px', borderRadius: 999 }}>{selected.type}</span>}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+              <a href={selected.phone ? `tel:${selected.phone}` : undefined} style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '10px 12px', borderRadius: 10, border: 'none', background: 'var(--accent)', color: 'white', fontSize: 14, fontWeight: 600, textDecoration: 'none', opacity: selected.phone ? 1 : 0.4, minHeight: 44 }}>
+                <Phone size={14} strokeWidth={1.8} /> Call
+              </a>
+              <a href={selected.email ? `mailto:${selected.email}` : undefined} style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '10px 12px', borderRadius: 10, border: '1px solid var(--line)', background: 'var(--panel)', color: 'var(--ink-2)', fontSize: 14, fontWeight: 600, textDecoration: 'none', opacity: selected.email ? 1 : 0.4, minHeight: 44 }}>
+                <Mail size={14} strokeWidth={1.8} /> Email
+              </a>
+            </div>
+            <div style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid var(--line)', marginBottom: 16 }}>
+              {[{ label: 'Phone', value: selected.phone || '—' }, { label: 'Email', value: selected.email || '—' }, { label: 'Organization', value: selected.company || '—' }, { label: 'Address', value: selected.address || '—' }].map(({ label, value }) => (
+                <div key={label} style={{ padding: '10px 14px', background: 'var(--bg)', borderBottom: '1px solid var(--line-2)' }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>{label}</div>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink-1)' }}>{value}</div>
+                </div>
+              ))}
+            </div>
+            {selected.notes && (
+              <div>
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>Notes</div>
+                <div style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.55, background: 'var(--bg)', borderRadius: 10, padding: '10px 12px', border: '1px solid var(--line)' }}>{selected.notes}</div>
+              </div>
+            )}
+          </div>
+          {modalContact && (
+            <ContactModal contact={modalContact} onClose={() => setModalContact(null)}
+              onSave={async (form) => { await handleSave(form); setModalContact(null); if (form.id) setSelected({ ...selected, ...form }) }}
+              onSaveAnother={() => refetchContacts()} />
+          )}
+        </div>
+      )
+    }
+
+    // List screen
+    const typeCounts = CONTACT_TYPES.reduce((acc, t) => { acc[t] = contacts.filter(c => c.type === t).length; return acc }, {})
+    const listFiltered = contacts.filter(c => {
+      if (showStarred) return false
+      if (activeType !== 'All' && c.type !== activeType) return false
+      if (search) { const q = search.toLowerCase(); if (!c.name.toLowerCase().includes(q) && !c.company?.toLowerCase().includes(q) && !c.phone?.includes(q)) return false }
+      return true
+    })
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+        {/* Mobile header */}
+        <div style={{ display: 'flex', alignItems: 'center', padding: '0 12px', height: 48, borderBottom: '1px solid var(--line)', background: 'var(--panel)', flexShrink: 0, gap: 10 }}>
+          <h1 style={{ flex: 1, fontSize: 17, fontWeight: 700, color: 'var(--ink-1)', margin: 0, letterSpacing: '-0.02em' }}>Contacts</h1>
+          <button onClick={() => setModalContact({ ...EMPTY })} style={{ width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--accent)', border: 'none', borderRadius: 10, cursor: 'pointer', color: 'white' }}>
+            <Plus size={18} strokeWidth={2.5} />
+          </button>
+        </div>
+        {/* Category chips - horizontal scroll */}
+        <div style={{ display: 'flex', gap: 6, padding: '8px 12px', overflowX: 'auto', scrollbarWidth: 'none', background: 'var(--panel)', borderBottom: '1px solid var(--line)', flexShrink: 0 }}>
+          {[{ label: 'All', count: contacts.length }, ...CONTACT_TYPES.map(t => ({ label: t, count: typeCounts[t] || 0 }))].filter(i => i.count > 0 || i.label === 'All').map(({ label, count }) => {
+            const isActive = !showStarred && activeType === label
+            return (
+              <button key={label} onClick={() => { setActiveType(label); setShowStarred(false) }} style={{ padding: '5px 12px', borderRadius: 999, whiteSpace: 'nowrap', flexShrink: 0, border: `1px solid ${isActive ? 'var(--accent)' : 'var(--line)'}`, background: isActive ? 'var(--accent-soft)' : 'var(--panel)', color: isActive ? 'var(--accent-ink)' : 'var(--ink-2)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+                {label} {count > 0 && <span style={{ opacity: 0.7 }}>{count}</span>}
+              </button>
+            )
+          })}
+        </div>
+        {/* Search */}
+        <div style={{ padding: '8px 12px', background: 'var(--panel)', borderBottom: '1px solid var(--line-2)', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 10, padding: '8px 12px' }}>
+            <Search size={14} color="var(--ink-4)" strokeWidth={1.8} />
+            <input placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)} style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontSize: 14, color: 'var(--ink-1)', fontFamily: 'inherit' }} />
+            {search && <button onClick={() => setSearch('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-4)', padding: 0, display: 'flex' }}><X size={14} /></button>}
+          </div>
+        </div>
+        {/* List */}
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          {loading ? <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-4)', fontSize: 13 }}>Loading…</div>
+           : listFiltered.length === 0 ? <div style={{ padding: 32, textAlign: 'center', color: 'var(--ink-4)', fontSize: 13 }}>{contacts.length === 0 ? 'No contacts yet' : 'No results'}</div>
+           : listFiltered.map(c => {
+            const meta = TYPE_META[c.type] || { dot: '#64748b' }
+            return (
+              <button key={c.id} onClick={() => { setSelected(c); setMobileView('detail') }}
+                style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', padding: '12px 16px', minHeight: 64, border: 'none', borderBottom: '1px solid var(--line-2)', background: 'var(--panel)', cursor: 'pointer', textAlign: 'left' }}>
+                <Avatar name={c.name} color={meta.dot} size={38} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</div>
+                  <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{[c.company, c.type].filter(Boolean).join(' · ')}</div>
+                </div>
+                <ChevronRight size={16} color="var(--ink-4)" />
+              </button>
+            )
+          })}
+        </div>
+        {modalContact && (
+          <ContactModal contact={modalContact} onClose={() => setModalContact(null)}
+            onSave={async (form) => { await handleSave(form); setModalContact(null); if (form.id) setSelected({ ...selected, ...form }) }}
+            onSaveAnother={() => refetchContacts()} />
+        )}
+      </div>
+    )
+  }
+
+  // ── Desktop render ───────────────────────────────────────────────────────────
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
 

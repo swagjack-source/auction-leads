@@ -4,12 +4,13 @@ import { supabase } from '../../lib/supabase'
 import { useTeam } from '../../lib/TeamContext'
 import logger from '../../lib/logger'
 import { formatPhone, validatePhone, validateEmail } from '../../lib/validate'
+import { useIsMobile } from '../../hooks/useIsMobile'
 
-const JOB_TYPES = ['Clean Out', 'Auction', 'Both', 'Move', 'Sorting/Organizing', 'Unknown']
 const LEAD_SOURCES = ['Phone Call', 'Email', 'Referral', 'Maximum', 'Website', 'Walk-in', 'Other']
 
 export default function NewLeadModal({ initialStage, onClose, onSave, onCreated }) {
   const { members } = useTeam()
+  const isMobile = useIsMobile()
   const nameRef = useRef(null)
   const overlayRef = useRef(null)
 
@@ -20,7 +21,8 @@ export default function NewLeadModal({ initialStage, onClose, onSave, onCreated 
   const [zip, setZip] = useState('')
   const [notes, setNotes] = useState('')
   const [leadSource, setLeadSource] = useState('')
-  const [jobType, setJobType] = useState('Unknown')
+  const [selectedTypes, setSelectedTypes] = useState([])
+  const [availableTypes, setAvailableTypes] = useState([])
   const [assignedTo, setAssignedTo] = useState('')
   const [employees, setEmployees] = useState([])
   const [expanded, setExpanded] = useState(false)
@@ -47,6 +49,12 @@ export default function NewLeadModal({ initialStage, onClose, onSave, onCreated 
         setEmployees(members.map(m => ({ id: m.id, name: m.name })))
       })
   }, [members])
+
+  useEffect(() => {
+    supabase.from('project_types').select('id, name').order('name').then(({ data }) => {
+      setAvailableTypes(data || [])
+    })
+  }, [])
 
   useEffect(() => {
     function onKey(e) {
@@ -91,6 +99,11 @@ export default function NewLeadModal({ initialStage, onClose, onSave, onCreated 
     setSubmitError(null)
     setSaving(true)
     try {
+      // Derive legacy job_type from multi-selection for backward compat
+      let derivedJobType = null
+      if (selectedTypes.includes('Clean Out') && selectedTypes.includes('Auction')) derivedJobType = 'Both'
+      else if (selectedTypes.length > 0) derivedJobType = selectedTypes[0]
+
       const leadData = {
         name: name.trim(),
         phone: phone.trim() || null,
@@ -99,11 +112,20 @@ export default function NewLeadModal({ initialStage, onClose, onSave, onCreated 
         zip_code: zip.trim() || null,
         notes: notes.trim() || null,
         lead_source: leadSource || null,
-        job_type: jobType || 'Unknown',
+        job_type: derivedJobType || 'Unknown',
         assigned_to: assignedTo || null,
         status: initialStage || 'New Lead',
       }
       const result = await onSave(leadData)
+      if (result && selectedTypes.length > 0) {
+        const { data: typeRows } = await supabase
+          .from('project_types').select('id, name').in('name', selectedTypes)
+        if (typeRows && typeRows.length > 0) {
+          await supabase.from('project_project_types').insert(
+            typeRows.map(t => ({ project_id: result.id, project_type_id: t.id }))
+          )
+        }
+      }
       if (result) onCreated?.(result)
       onClose()
     } catch (err) {
@@ -124,7 +146,16 @@ export default function NewLeadModal({ initialStage, onClose, onSave, onCreated 
         display: 'grid', placeItems: 'center',
       }}
     >
-      <div style={{
+      <div style={isMobile ? {
+        position: 'fixed', left: 0, right: 0, bottom: 0,
+        zIndex: 9999,
+        background: 'var(--panel)',
+        borderRadius: '16px 16px 0 0',
+        boxShadow: '0 -8px 40px rgba(20,22,26,0.18)',
+        display: 'flex', flexDirection: 'column',
+        maxHeight: '95dvh',
+        animation: 'slideup 240ms cubic-bezier(.2,.7,.3,1.05)',
+      } : {
         position: 'relative', zIndex: 9999,
         background: 'var(--panel)',
         border: '1px solid var(--line)',
@@ -247,12 +278,38 @@ export default function NewLeadModal({ initialStage, onClose, onSave, onCreated 
                 </select>
               </div>
 
-              {/* Job Type */}
+              {/* Project Types */}
               <div>
-                <label style={fieldLabel}>Job Type</label>
-                <select value={jobType} onChange={e => setJobType(e.target.value)} style={inputStyle}>
-                  {JOB_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
+                <label style={fieldLabel}>Project Types</label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                  {availableTypes.map(t => {
+                    const sel = selectedTypes.includes(t.name)
+                    return (
+                      <label
+                        key={t.id}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 5,
+                          padding: '4px 10px', borderRadius: 7, cursor: 'pointer',
+                          border: `1px solid ${sel ? 'var(--accent)' : 'var(--line)'}`,
+                          background: sel ? 'var(--accent-soft)' : 'var(--bg)',
+                          color: sel ? 'var(--accent-ink)' : 'var(--ink-2)',
+                          fontSize: 12.5, fontWeight: 500,
+                          transition: 'all 120ms', userSelect: 'none',
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={sel}
+                          onChange={() => setSelectedTypes(prev =>
+                            prev.includes(t.name) ? prev.filter(x => x !== t.name) : [...prev, t.name]
+                          )}
+                          style={{ display: 'none' }}
+                        />
+                        {t.name}
+                      </label>
+                    )
+                  })}
+                </div>
               </div>
 
               {/* Assigned To */}

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { NavLink } from 'react-router-dom'
-import { Home, Columns3, FolderOpen, CalendarDays, BookUser, Users, BookOpen, Image, X, Search, FileText, LogOut, Gavel, Package, ReceiptText, Bookmark, Bell, Handshake, ClipboardList, ShieldCheck } from 'lucide-react'
+import { Home, Columns3, FolderOpen, CalendarDays, BookUser, Users, BookOpen, Image, X, Search, FileText, LogOut, Gavel, Package, ReceiptText, Bookmark, Bell, Handshake, ClipboardList, ShieldCheck, Star } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useTheme } from '../../lib/ThemeContext'
 import { useAuth } from '../../lib/AuthContext'
@@ -10,7 +10,7 @@ function SectionLabel({ children }) {
     <div style={{
       fontSize: 10.5, color: 'var(--ink-4)',
       textTransform: 'uppercase', letterSpacing: '0.08em',
-      fontWeight: 600, padding: '10px 10px 4px',
+      fontWeight: 600, padding: '7px 10px 3px',
     }}>{children}</div>
   )
 }
@@ -25,7 +25,7 @@ function NavItem({ to, icon: Icon, label, badge, mobile, onClose }) {
         display: 'flex',
         alignItems: 'center',
         gap: 10,
-        padding: '7px 10px',
+        padding: '5px 10px',
         borderRadius: 8,
         textDecoration: 'none',
         fontSize: 13,
@@ -92,6 +92,7 @@ export default function Sidebar({ mobile, onClose }) {
     { to: '/calendar',  icon: CalendarDays, label: 'Calendar',      badge: calendarCount },
     { to: '/bdr',       icon: Handshake,    label: 'BDR'            },
     { to: '/contacts',  icon: BookUser,     label: 'Contacts'       },
+    { to: '/partners',  icon: Star,         label: 'Partners'       },
 { to: '/schedule',  icon: ClipboardList, label: 'Crew Schedule'  },
     { to: '/training',  icon: BookOpen,     label: 'Training'       },
     { to: '/library',   icon: Image,        label: 'Library'        },
@@ -116,7 +117,7 @@ export default function Sidebar({ mobile, onClose }) {
       display: 'flex',
       flexDirection: 'column',
       flexShrink: 0,
-      padding: '14px 10px 10px',
+      padding: '10px 10px 10px',
       ...(mobile ? {
         position: 'fixed',
         top: 0, left: 0,

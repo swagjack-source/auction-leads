@@ -202,6 +202,10 @@ body {
   from { transform: translateX(24px); opacity: 0 }
   to   { transform: translateX(0);    opacity: 1 }
 }
+@keyframes slideup {
+  from { transform: translateY(60px); opacity: 0 }
+  to   { transform: translateY(0);    opacity: 1 }
+}
 @keyframes spin {
   from { transform: rotate(0deg) }
   to   { transform: rotate(360deg) }

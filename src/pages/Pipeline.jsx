@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { createPortal } from 'react-dom'
-import { Search, X, Bell, CalendarDays, Send, TrendingUp, ArrowUpDown, ChevronDown, Upload, MapPin, ExternalLink } from 'lucide-react'
+import { Search, X, Bell, CalendarDays, Send, TrendingUp, ArrowUpDown, ChevronDown, Upload, MapPin, ExternalLink, Plus } from 'lucide-react'
+import { useIsMobile } from '../hooks/useIsMobile'
 import * as XLSX from 'xlsx'
 import StageColumn, { STAGE_META } from '../components/Pipeline/StageColumn'
 import LeadCard from '../components/Pipeline/LeadCard'
@@ -21,13 +22,116 @@ import { useAuth } from '../lib/AuthContext'
 import logger from '../lib/logger'
 import { MOCK_LEADS } from '../lib/mockData'
 
-const JOB_FILTERS = ['All', 'Clean Out', 'Auction', 'Both']
+const JOB_FILTERS = ['All', 'Clean Out', 'Auction', 'Move', 'In-person Estate Sale']
 
 const OUTCOME_FILTERS = [
   { key: 'Won',     label: 'Won',     color: 'var(--win)',  soft: 'var(--win-soft)'  },
   { key: 'Lost',    label: 'Lost',    color: 'var(--lose)', soft: 'var(--lose-soft)' },
   { key: 'Backlog', label: 'Backlog', color: 'var(--ink-3)',soft: 'var(--hover)'     },
 ]
+
+// ── Mobile pipeline board ──────────────────────────────────────────────────
+
+function MobilePipelineBoard({ stages, grouped, onCardClick, openNewLeadForStage, loading, error, onRetry }) {
+  const [collapsed, setCollapsed] = useState(() => {
+    const init = {}
+    OUTCOME_STAGES.forEach(s => { init[s] = true })
+    return init
+  })
+  function toggle(s) { setCollapsed(prev => ({ ...prev, [s]: !prev[s] })) }
+
+  if (loading) return <div style={{ flex: 1, display: 'grid', placeItems: 'center', color: 'var(--ink-4)', fontSize: 13 }}>Loading leads…</div>
+  if (error) return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+      <div style={{ color: '#ef4444', fontSize: 13 }}>{error}</div>
+      <button className="btn btn-secondary" onClick={onRetry}>Retry</button>
+    </div>
+  )
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '8px 12px 24px' }}>
+      {stages.map(stage => {
+        const leads = grouped(stage)
+        const isCollapsed = !!collapsed[stage]
+        const meta = STAGE_META[stage] || {}
+        return (
+          <div key={stage} style={{ marginBottom: 8 }}>
+            <button
+              onClick={() => toggle(stage)}
+              style={{
+                width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+                padding: '11px 14px', minHeight: 44,
+                borderRadius: isCollapsed ? 10 : '10px 10px 0 0',
+                background: 'var(--panel)',
+                border: '1px solid var(--line)',
+                borderBottom: isCollapsed ? undefined : 'none',
+                cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit',
+              }}
+            >
+              {meta.dot && <span style={{ width: 8, height: 8, borderRadius: '50%', background: meta.dot, flexShrink: 0 }} />}
+              <span style={{ flex: 1, fontSize: 13.5, fontWeight: 600, color: 'var(--ink-1)' }}>{stage}</span>
+              <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--ink-3)', background: 'var(--bg)', borderRadius: 20, padding: '2px 8px' }}>{leads.length}</span>
+              <ChevronDown size={14} color="var(--ink-3)" style={{ transform: isCollapsed ? 'none' : 'rotate(180deg)', transition: 'transform 200ms', flexShrink: 0 }} />
+            </button>
+            {!isCollapsed && (
+              <div style={{ border: '1px solid var(--line)', borderTop: 'none', borderRadius: '0 0 10px 10px', background: 'var(--bg-2)', padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {leads.length === 0
+                  ? <div style={{ padding: '12px 4px', textAlign: 'center', color: 'var(--ink-4)', fontSize: 12.5 }}>No leads in this stage</div>
+                  : leads.map(lead => (
+                    <div key={lead.id} onClick={() => onCardClick(lead)} style={{ cursor: 'pointer' }}>
+                      <LeadCard lead={lead} />
+                    </div>
+                  ))
+                }
+                <button
+                  onClick={() => openNewLeadForStage(stage)}
+                  style={{ padding: 10, borderRadius: 8, border: '1px dashed var(--line-2)', background: 'transparent', color: 'var(--ink-4)', fontSize: 12.5, cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: 44 }}
+                >
+                  <Plus size={13} strokeWidth={2} /> Add lead
+                </button>
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ── Mobile filter bar ──────────────────────────────────────────────────────
+
+function MobileFilterBar({ search, setSearch, jobFilter, setJobFilter }) {
+  return (
+    <div style={{ flexShrink: 0, borderBottom: '1px solid var(--line)', background: 'var(--panel)' }}>
+      <div style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center' }}>
+          <Search size={13} style={{ position: 'absolute', left: 9, color: 'var(--ink-4)', pointerEvents: 'none' }} />
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search leads…"
+            style={{ width: '100%', paddingLeft: 28, paddingRight: search ? 28 : 10, paddingTop: 8, paddingBottom: 8, fontSize: 13, border: '1px solid var(--line)', borderRadius: 10, background: 'var(--bg)', color: 'var(--ink-1)', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }}
+          />
+          {search && (
+            <button onClick={() => setSearch('')} style={{ position: 'absolute', right: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-4)', padding: 4, display: 'flex' }}>
+              <X size={12} />
+            </button>
+          )}
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 6, padding: '0 12px 8px', overflowX: 'auto', scrollbarWidth: 'none' }}>
+        {JOB_FILTERS.map(f => (
+          <button key={f} onClick={() => setJobFilter(f)} style={{
+            padding: '5px 12px', borderRadius: 999, whiteSpace: 'nowrap', flexShrink: 0,
+            border: '1px solid ' + (jobFilter === f ? 'var(--accent)' : 'var(--line)'),
+            background: jobFilter === f ? 'var(--accent-soft)' : 'var(--panel)',
+            color: jobFilter === f ? 'var(--accent-ink)' : 'var(--ink-2)',
+            fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+          }}>{f}</button>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 function BoardHeader({ jobFilter, setJobFilter, outcomeFilter, setOutcomeFilter, view, setView, onImport, fileRef, selectedMember, setSelectedMember, sortBy, setSortBy, search, setSearch }) {
   const { members } = useTeam()
@@ -242,8 +346,8 @@ function ActionStatCard({ icon: Icon, iconColor, iconBg, label, value, subtext, 
       style={{
         background: cardBg || 'var(--panel)',
         border: '1px solid var(--line)',
-        borderRadius: 14, padding: '14px 16px',
-        display: 'flex', flexDirection: 'column', gap: 10,
+        borderRadius: 10, padding: '7px 12px',
+        display: 'flex', alignItems: 'center', gap: 10,
         boxShadow: 'var(--shadow-1)',
         cursor: 'pointer',
         transition: 'box-shadow 120ms, border-color 120ms, background 200ms',
@@ -251,20 +355,18 @@ function ActionStatCard({ icon: Icon, iconColor, iconBg, label, value, subtext, 
       onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 18px rgba(20,22,26,0.13)'; e.currentTarget.style.borderColor = 'var(--ink-4)' }}
       onMouseLeave={e => { e.currentTarget.style.boxShadow = 'var(--shadow-1)'; e.currentTarget.style.borderColor = 'var(--line)' }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <div style={{ width: 28, height: 28, borderRadius: 8, background: iconBg, display: 'grid', placeItems: 'center', flexShrink: 0 }}>
-          <Icon size={15} strokeWidth={1.8} color={iconColor} />
-        </div>
-        <span style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 500 }}>{label}</span>
+      <div style={{ width: 26, height: 26, borderRadius: 7, background: iconBg, display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+        <Icon size={13} strokeWidth={1.8} color={iconColor} />
       </div>
-      <div>
-        <div className="tnum" style={{ fontSize: 26, fontWeight: 700, letterSpacing: '-0.02em', lineHeight: 1, color: 'var(--ink-1)' }}>{value}</div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</div>
         {subtext && (
-          <div style={{ fontSize: 11, color: subtextColor || 'var(--ink-4)', marginTop: 5, fontWeight: subtextColor ? 600 : 400 }}>
+          <div style={{ fontSize: 10, color: subtextColor || 'var(--ink-4)', fontWeight: subtextColor ? 600 : 400, marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {subtext}
           </div>
         )}
       </div>
+      <div className="tnum" style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.02em', lineHeight: 1, color: 'var(--ink-1)', flexShrink: 0 }}>{value}</div>
     </div>
   )
 }
@@ -372,6 +474,7 @@ function enrichLead(lead) {
 
 export default function Pipeline() {
   const { organizationId } = useAuth()
+  const isMobile = useIsMobile()
   const [leads, setLeads] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -765,7 +868,11 @@ export default function Pipeline() {
       if (search && !l.name.toLowerCase().includes(search.toLowerCase()) &&
           !l.address?.toLowerCase().includes(search.toLowerCase()) &&
           !l.phone?.includes(search)) return false
-      if (jobFilter !== 'All' && l.job_type !== jobFilter) return false
+      if (jobFilter !== 'All') {
+        // OR logic: 'Both' leads match Clean Out or Auction filters
+        const types = l.job_type === 'Both' ? ['Clean Out', 'Auction'] : [l.job_type].filter(Boolean)
+        if (!types.includes(jobFilter)) return false
+      }
       if (outcomeFilter && l.status !== outcomeFilter) return false
       if (statusFilter && l.status !== statusFilter) return false
       if (selectedMember && l.assigned_to !== selectedMember) return false
@@ -1001,10 +1108,12 @@ export default function Pipeline() {
 
         return (
           <div style={{
-            padding: '14px 20px 8px',
+            padding: isMobile ? '8px 12px' : '10px 20px 10px',
             borderBottom: '1px solid var(--line)',
             flexShrink: 0,
-            display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12,
+            display: 'grid',
+            gridTemplateColumns: isMobile ? 'repeat(2,1fr)' : 'repeat(4,1fr)',
+            gap: isMobile ? 8 : 10,
           }}>
             {/* Card 1: Needs Follow-Up */}
             <ActionStatCard
@@ -1046,16 +1155,18 @@ export default function Pipeline() {
         )
       })()}
 
-      {/* Board header */}
-      <BoardHeader
-        jobFilter={jobFilter} setJobFilter={setJobFilter}
-        outcomeFilter={outcomeFilter} setOutcomeFilter={setOutcomeFilter}
-        view={view} setView={setView}
-        onImport={handleImportLeads} fileRef={importFileRef}
-        selectedMember={selectedMember} setSelectedMember={setSelectedMember}
-        sortBy={sortBy} setSortBy={setSortBy}
-        search={search} setSearch={setSearch}
-      />
+      {/* Board header — desktop only; mobile uses MobileFilterBar inline */}
+      {!isMobile && (
+        <BoardHeader
+          jobFilter={jobFilter} setJobFilter={setJobFilter}
+          outcomeFilter={outcomeFilter} setOutcomeFilter={setOutcomeFilter}
+          view={view} setView={setView}
+          onImport={handleImportLeads} fileRef={importFileRef}
+          selectedMember={selectedMember} setSelectedMember={setSelectedMember}
+          sortBy={sortBy} setSortBy={setSortBy}
+          search={search} setSearch={setSearch}
+        />
+      )}
 
       {/* Transition error banner */}
       {transitionError && (
@@ -1151,7 +1262,22 @@ export default function Pipeline() {
       {view === 'map' && (
         <PipelineMapView leads={filtered} onOpen={setDrawerLead} />
       )}
-      {view === 'board' && (
+      {view === 'board' && isMobile && (
+        <>
+          <MobileFilterBar search={search} setSearch={setSearch} jobFilter={jobFilter} setJobFilter={setJobFilter} />
+          <MobilePipelineBoard
+            stages={[...ACTIVE_STAGES, ...OUTCOME_STAGES]}
+            grouped={grouped}
+            onCardClick={setDrawerLead}
+            openNewLeadForStage={openNewLeadForStage}
+            loading={loading}
+            error={error}
+            onRetry={fetchLeads}
+          />
+        </>
+      )}
+
+      {view === 'board' && !isMobile && (
       <div ref={boardRef} className="pipeline-board" style={{ flex: 1, minHeight: 0, overflowX: 'auto', overflowY: 'hidden', padding: '6px 20px 20px', scrollbarWidth: 'auto', scrollbarColor: 'var(--scrollbar) var(--bg-2)' }}>
         {loading ? (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text3)', fontSize: 13 }}>

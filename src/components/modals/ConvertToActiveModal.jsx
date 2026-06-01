@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
-import { X, CalendarDays, Users } from 'lucide-react'
+import { X, CalendarDays, Users, ListChecks } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../lib/AuthContext'
 import { estimateLabourHours } from '../../lib/scoring'
 import { getChecklistForType } from '../../lib/checklists'
+import { suggestTimeline } from '../../lib/eventTemplates'
 import logger from '../../lib/logger'
 
 function addWorkdays(startDateStr, days) {
@@ -16,6 +17,12 @@ function addWorkdays(startDateStr, days) {
   return d.toISOString().slice(0, 10)
 }
 
+const inputStyle = {
+  width: '100%', background: 'var(--bg)', border: '1px solid var(--line)',
+  borderRadius: 9, padding: '7px 10px', fontSize: 13, color: 'var(--ink-1)',
+  outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box',
+}
+
 export default function ConvertToActiveModal({ project, onClose, onConverted }) {
   const { organizationId } = useAuth()
   const [startDate, setStartDate]       = useState('')
@@ -25,6 +32,10 @@ export default function ConvertToActiveModal({ project, onClose, onConverted }) 
   const [saving, setSaving]             = useState(false)
   const [error, setError]               = useState(null)
 
+  // Step 2 state
+  const [step, setStep]               = useState(1)
+  const [draftEvents, setDraftEvents] = useState([])
+
   const labourHours = project._scoreDetails?.labourHours
     ?? estimateLabourHours(project.square_footage || 1500, project.density || 'Medium')
   const durationDays = Math.max(1, Math.ceil(labourHours / 8))
@@ -33,7 +44,6 @@ export default function ConvertToActiveModal({ project, onClose, onConverted }) 
   useEffect(() => {
     let cancelled = false
     async function load() {
-      // Try job-type-matched team first
       if (project.job_type) {
         const { data: typeRow } = await supabase
           .from('project_types').select('id').eq('name', project.job_type).maybeSingle()
@@ -53,7 +63,6 @@ export default function ConvertToActiveModal({ project, onClose, onConverted }) 
           }
         }
       }
-      // Fallback: all active employees
       const { data, error: empErr } = await supabase
         .from('employees').select('id, name, role, active').eq('active', true).order('name')
       if (cancelled) return
@@ -71,21 +80,16 @@ export default function ConvertToActiveModal({ project, onClose, onConverted }) 
     return () => { cancelled = true }
   }, [project.job_type])
 
-  async function handleConfirm() {
-    if (!startDate) { setError('Please select a start date'); return }
+  async function doSave(eventsToCreate) {
     setSaving(true)
     setError(null)
-
     try {
       const assignedIds = Object.entries(checked).filter(([, v]) => v).map(([id]) => id)
 
-      // Generate checklist if the lead doesn't have one yet
       const existingChecklist = Array.isArray(project.checklist) && project.checklist.length > 0
-        ? project.checklist
-        : null
+        ? project.checklist : null
       const checklist = existingChecklist || getChecklistForType(project.job_type)
 
-      // 1. Update lead row
       const { error: leadErr } = await supabase.from('leads').update({
         status:        'Project Scheduled',
         project_start: startDate,
@@ -99,7 +103,6 @@ export default function ConvertToActiveModal({ project, onClose, onConverted }) 
         return
       }
 
-      // 2. Insert scheduled_projects row
       const { error: schedErr } = await supabase.from('scheduled_projects').insert({
         lead_id:      project.id,
         start_date:   startDate,
@@ -107,13 +110,8 @@ export default function ConvertToActiveModal({ project, onClose, onConverted }) 
         labour_hours: labourHours,
         job_type:     project.job_type,
       })
-      if (schedErr) {
-        logger.error('ConvertToActive scheduled_projects insert failed', schedErr)
-        // Non-fatal: lead is already updated. Surface as warning only.
-      }
+      if (schedErr) logger.error('ConvertToActive scheduled_projects insert failed', schedErr)
 
-      // 3. Insert project_assignments per checked employee
-      // organization_id is required by the RLS policy WITH CHECK clause.
       if (assignedIds.length > 0) {
         const rows = assignedIds.map(employee_id => ({
           lead_id: project.id,
@@ -123,6 +121,18 @@ export default function ConvertToActiveModal({ project, onClose, onConverted }) 
         }))
         const { error: paErr } = await supabase.from('project_assignments').insert(rows)
         if (paErr) logger.error('ConvertToActive project_assignments insert failed', paErr)
+      }
+
+      if (eventsToCreate.length > 0) {
+        const eventRows = eventsToCreate.map(ev => ({
+          lead_id:         project.id,
+          organization_id: organizationId,
+          event_type:      ev.event_type,
+          event_date:      ev.start_date + 'T00:00:00',
+          end_date:        ev.end_date ? ev.end_date + 'T00:00:00' : null,
+        }))
+        const { error: evtErr } = await supabase.from('project_events').insert(eventRows)
+        if (evtErr) logger.error('ConvertToActive project_events insert failed', evtErr)
       }
 
       onConverted?.({
@@ -139,6 +149,140 @@ export default function ConvertToActiveModal({ project, onClose, onConverted }) 
     }
   }
 
+  async function handleConfirm() {
+    if (!startDate) { setError('Please select a start date'); return }
+    const suggested = suggestTimeline(project.job_type, startDate)
+    if (suggested.length > 0) {
+      setDraftEvents(suggested.map(ev => ({ ...ev, checked: true })))
+      setStep(2)
+      return
+    }
+    await doSave([])
+  }
+
+  function updateDraft(i, field, value) {
+    setDraftEvents(prev => prev.map((ev, idx) => idx === i ? { ...ev, [field]: value } : ev))
+  }
+
+  function fmtDate(dateStr) {
+    if (!dateStr) return ''
+    const [y, m, d] = dateStr.split('-')
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+    return `${months[parseInt(m,10)-1]} ${parseInt(d,10)}`
+  }
+
+  // ── Step 2 render ──────────────────────────────────────────────────────────
+  if (step === 2) {
+    const selectedEvents = draftEvents.filter(ev => ev.checked)
+    return (
+      <div
+        style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'var(--overlay-heavy)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+        onClick={e => { if (e.target === e.currentTarget) onClose() }}
+      >
+        <div style={{ background: 'var(--panel)', borderRadius: 16, width: '100%', maxWidth: 520, boxShadow: 'var(--shadow-lg)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+
+          <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <ListChecks size={16} color="var(--accent)" />
+              <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--ink-1)' }}>Suggested Timeline</span>
+            </div>
+            <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-3)', display: 'grid', placeItems: 'center' }}><X size={16} /></button>
+          </div>
+
+          <div style={{ padding: '16px 20px', overflowY: 'auto', maxHeight: 500 }}>
+            <div style={{ fontSize: 12.5, color: 'var(--ink-3)', marginBottom: 14 }}>
+              Based on <strong style={{ color: 'var(--ink-2)' }}>{project.job_type}</strong> starting <strong style={{ color: 'var(--ink-2)' }}>{fmtDate(startDate)}</strong>. Uncheck to skip any event.
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {draftEvents.map((ev, i) => (
+                <div
+                  key={i}
+                  style={{
+                    display: 'flex', alignItems: 'flex-start', gap: 10,
+                    padding: '10px 12px', borderRadius: 9,
+                    border: `1px solid ${ev.checked ? 'var(--accent-soft)' : 'var(--line)'}`,
+                    background: ev.checked ? 'var(--accent-soft)' : 'var(--bg)',
+                    opacity: ev.checked ? 1 : 0.5,
+                    transition: 'all 120ms',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={ev.checked}
+                    onChange={e => updateDraft(i, 'checked', e.target.checked)}
+                    style={{ marginTop: 3, width: 15, height: 15, accentColor: 'var(--accent)', flexShrink: 0, cursor: 'pointer' }}
+                  />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink-1)', marginBottom: 6 }}>{ev.event_type}</div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <div style={{ flex: 1, minWidth: 110 }}>
+                        <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: 3 }}>Start</div>
+                        <input
+                          type="date"
+                          value={ev.start_date}
+                          onChange={e => updateDraft(i, 'start_date', e.target.value)}
+                          disabled={!ev.checked}
+                          style={{ ...inputStyle, fontSize: 12, padding: '5px 8px' }}
+                        />
+                      </div>
+                      {ev.end_date !== null && (
+                        <div style={{ flex: 1, minWidth: 110 }}>
+                          <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--ink-4)', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: 3 }}>End</div>
+                          <input
+                            type="date"
+                            value={ev.end_date}
+                            onChange={e => updateDraft(i, 'end_date', e.target.value)}
+                            disabled={!ev.checked}
+                            style={{ ...inputStyle, fontSize: 12, padding: '5px 8px' }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {error && <div style={{ marginTop: 12, fontSize: 12.5, color: 'var(--lose)', background: 'var(--lose-soft)', borderRadius: 8, padding: '8px 12px' }}>{error}</div>}
+          </div>
+
+          <div style={{ padding: '12px 20px', borderTop: '1px solid var(--line)', display: 'flex', gap: 8, justifyContent: 'flex-end', background: 'var(--bg-2)' }}>
+            <button
+              onClick={() => setStep(1)}
+              disabled={saving}
+              style={{ padding: '9px 16px', borderRadius: 9, border: '1px solid var(--line)', background: 'var(--panel)', color: 'var(--ink-2)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+            >
+              Back
+            </button>
+            <button
+              onClick={() => doSave([])}
+              disabled={saving}
+              style={{ padding: '9px 16px', borderRadius: 9, border: '1px solid var(--line)', background: 'var(--panel)', color: 'var(--ink-2)', fontSize: 13, fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer' }}
+            >
+              Skip events
+            </button>
+            <button
+              onClick={() => doSave(selectedEvents)}
+              disabled={saving || selectedEvents.length === 0}
+              style={{
+                padding: '9px 20px', borderRadius: 9, border: 'none',
+                background: (saving || selectedEvents.length === 0) ? 'var(--line)' : 'var(--accent)',
+                color: (saving || selectedEvents.length === 0) ? 'var(--ink-3)' : '#FFFFFF',
+                fontSize: 13, fontWeight: 600,
+                cursor: (saving || selectedEvents.length === 0) ? 'not-allowed' : 'pointer',
+                display: 'flex', alignItems: 'center', gap: 6,
+              }}
+            >
+              <ListChecks size={13} /> {saving ? 'Saving…' : `Save with ${selectedEvents.length} event${selectedEvents.length !== 1 ? 's' : ''}`}
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Step 1 render ──────────────────────────────────────────────────────────
   return (
     <div
       style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'var(--overlay-heavy)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
