@@ -29,6 +29,11 @@
   to = "/.netlify/functions/send-estimate"
   status = 200
 
+[[redirects]]
+  from = "/api/ctbids-snapshot"
+  to = "/.netlify/functions/ctbids-snapshot"
+  status = 200
+
 # SPA fallback — must come last
 [[redirects]]
   from = "/*"
