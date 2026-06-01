@@ -7,6 +7,7 @@ import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
 import CTBidsLiveTab from './CTBidsLiveTab'
 import CTBidsIntelligenceTab from './CTBidsIntelligenceTab'
+import CTBidsSnapshotTab from './CTBidsSnapshotTab'
 
 export const PROFIT_THRESHOLD = 60
 
@@ -1259,6 +1260,7 @@ export default function CTBids() {
       {/* Tabs */}
       <div style={{ padding: '16px 28px 0', borderBottom: '1px solid var(--line)', marginBottom: 22, display: 'flex', gap: 4 }}>
         <CTTab active={tab === 'live'} onClick={() => setTab('live')} label="Live Auction" liveDot={hasActiveLive} />
+        <CTTab active={tab === 'track'} onClick={() => setTab('track')} label="Track" />
         <CTTab active={tab === 'auctions'} onClick={() => setTab('auctions')} label="Auctions" count={D.sales.length} />
         <CTTab active={tab === 'categories'} onClick={() => setTab('categories')} label="Categories" count={D.categories.length} />
         <CTTab active={tab === 'items'} onClick={() => setTab('items')} label="Items" count={(D.allItems || D.topItems || []).length} />
@@ -1272,6 +1274,7 @@ export default function CTBids() {
           onSwitchTab={setTab}
         />
       )}
+      {tab === 'track' && <CTBidsSnapshotTab />}
       {tab === 'auctions' && <AuctionsTab D={D} />}
       {tab === 'categories' && (
         <CategoriesTab
